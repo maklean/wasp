@@ -2,5 +2,6 @@
 name = "wasp"
 version = "0.1.0"
 edition = "2024"
+description = "A WebAssembly interpreter written in Rust, compliant with the 1.0 spec."
 
 [dependencies]
