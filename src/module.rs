@@ -1,21 +1,24 @@
-use crate::errors::DecodeError;
+use crate::{decoder::Decoder, errors::DecodeError};
 
 const MAGIC_HEADER: &[u8; 4] = b"\0asm";
-const WASM_SPEC_VERSION: &[u8; 4] = &[1, 0, 0, 0];
+const WASM_1_0_SPEC_VERSION: &[u8; 4] = &[1, 0, 0, 0];
 
+#[derive(Debug)]
 pub struct Module {
 
 }
 
 impl Module {
     pub fn decode(bytes: &[u8]) -> Result<Self, DecodeError> {
-        // Check for magic header
-        if bytes.len() < 4 || &bytes[0..4] != MAGIC_HEADER {
+        let mut decoder = Decoder::new(bytes);
+        
+        // read magic header
+        if decoder.read_bytes(MAGIC_HEADER.len())? != MAGIC_HEADER {
             return Err(DecodeError::InvalidMagicHeader);
         }
 
-        // Check for version number
-        if bytes.len() < 8 || &bytes[4..8] != WASM_SPEC_VERSION {
+        // read wasm specification version
+        if decoder.read_bytes(WASM_1_0_SPEC_VERSION.len())? != WASM_1_0_SPEC_VERSION {
             return Err(DecodeError::InvalidSpecificationVersion);
         }
 

@@ -1,5 +1,6 @@
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Debug)]
 pub enum DecodeError {
     InvalidMagicHeader,
     InvalidSpecificationVersion,
+    UnexpectedEof,
 }
