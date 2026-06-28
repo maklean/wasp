@@ -1,9 +1,25 @@
+use crate::errors::DecodeError;
+
 /// Types that Wasm code can use for its values.
 pub enum ValType {
     I32,
     I64,
     F32,
     F64
+}
+
+impl TryFrom<u8> for ValType {
+    type Error = DecodeError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0x7f => Ok(Self::I32),
+            0x7e => Ok(Self::I64),
+            0x7d => Ok(Self::F32),
+            0x7c => Ok(Self::F64),
+            _ => Err(DecodeError::InvalidValType),
+        }
+    }
 }
 
 /// Signature of functions; maps vector of parameters to vector of results (in Wasm 1.0, there's only at most 1 result returned).
@@ -144,4 +160,44 @@ pub enum Desc {
 
     /// Global Index.
     Global(u32),
+}
+
+/// Wasm module section
+#[repr(u8)]
+#[derive(PartialEq)]
+pub enum Section {
+    Custom,
+    Type,
+    Import,
+    Function,
+    Table,
+    Memory,
+    Global,
+    Export,
+    Start,
+    Element,
+    Code, 
+    Data
+}
+
+impl TryFrom<u8> for Section {
+    type Error = DecodeError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0x00 => Ok(Section::Custom),
+            0x01 => Ok(Section::Type),
+            0x02 => Ok(Section::Import),
+            0x03 => Ok(Section::Function),
+            0x04 => Ok(Section::Table),
+            0x05 => Ok(Section::Memory),
+            0x06 => Ok(Section::Global),
+            0x07 => Ok(Section::Export),
+            0x08 => Ok(Section::Start),
+            0x09 => Ok(Section::Element),
+            0x0A => Ok(Section::Code),
+            0x0B => Ok(Section::Data),
+            _ => Err(DecodeError::MalformedInteger),
+        }
+    }
 }

@@ -45,6 +45,20 @@ impl<'a> Decoder<'a> {
         Ok(slice)
     }
 
+    /// Advances by one if the next byte matches the expected byte, otherwise the given error is returned.
+    pub fn match_byte(&mut self, expect: u8, err: DecodeError) -> Result<(), DecodeError> {
+        self.match_bytes(1, &[expect], err)
+    }
+
+    /// Advances by `n` if the next bytes match the expected bytes, otherwise the given error is returned.
+    pub fn match_bytes(&mut self, n: usize, expect: &[u8], err: DecodeError) -> Result<(), DecodeError> {
+        if self.read_bytes(n)? != expect {
+            Err(err)
+        } else {
+            Ok(())
+        }
+    }
+
     /// Reads a LEB128 encoded unsigned 32-bit integer.
     pub fn read_u32(&mut self) -> Result<u32, DecodeError> {
         Ok(self.read_uint(32)? as u32)
