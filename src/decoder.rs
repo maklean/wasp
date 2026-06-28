@@ -13,6 +13,17 @@ impl<'a> Decoder<'a> {
         Self { bytes, pos: 0 }
     }
 
+    /// Returns the amount of bytes left to read.
+    pub fn len(&self) -> usize {
+        self.bytes.len() - self.pos
+    }
+
+    /// Returns whether we've reached EOF.
+    pub fn eof(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Reads a single byte from the data and advances by one.
     pub fn read_byte(&mut self) -> Result<u8, DecodeError> {
         if self.pos >= self.bytes.len() {
             return Err(DecodeError::UnexpectedEof);
@@ -23,6 +34,7 @@ impl<'a> Decoder<'a> {
         Ok(byte)
     }
 
+    /// Reads `n` bytes from the data and advances by `n`.
     pub fn read_bytes(&mut self, n: usize) -> Result<&[u8], DecodeError> {
         if self.pos + n > self.bytes.len() {
             return Err(DecodeError::UnexpectedEof);
