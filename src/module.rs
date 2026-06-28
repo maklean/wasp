@@ -63,7 +63,7 @@ impl Module {
         Ok(this)
     }
 
-    /// Decodes each section
+    /// Decodes each section in the module.
     fn decode_sections(&mut self, decoder: &mut Decoder) -> Result<(), DecodeError> {
         loop {
             let section_id: Section = Section::try_from(decoder.read_byte()?)?;
@@ -88,6 +88,7 @@ impl Module {
         Ok(())
     }
 
+    /// Decodes the type section in the module.
     fn decode_type_section(&mut self, decoder: &mut Decoder) -> Result<(), DecodeError> {
         let n = decoder.read_u32()?;
 
