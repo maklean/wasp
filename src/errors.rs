@@ -3,4 +3,5 @@ pub enum DecodeError {
     InvalidMagicHeader,
     InvalidSpecificationVersion,
     UnexpectedEof,
+    MalformedInteger,
 }

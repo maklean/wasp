@@ -1,5 +1,4 @@
-use crate::{decoder::Decoder, errors::DecodeError};
-use crate::definitions::*;
+use crate::{decoder::Decoder, errors::DecodeError, definitions::*};
 
 const MAGIC_HEADER: &[u8; 4] = b"\0asm";
 const WASM_1_0_SPEC_VERSION: &[u8; 4] = &[1, 0, 0, 0];
