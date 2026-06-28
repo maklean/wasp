@@ -55,17 +55,15 @@ impl Module {
             ..Default::default()
         };
 
-        // decode sections if we haven't reached EOF
-        if !decoder.eof() {
-            this.decode_sections(&mut decoder)?;
-        }
+        // decode sections
+        this.decode_sections(&mut decoder)?;
 
         Ok(this)
     }
 
     /// Decodes each section in the module.
     fn decode_sections(&mut self, decoder: &mut Decoder) -> Result<(), DecodeError> {
-        loop {
+        while !decoder.eof() {
             let section_id: Section = Section::try_from(decoder.read_byte()?)?;
             let section_size = decoder.read_u32()?;
             let mut section = Decoder::new(decoder.read_bytes(section_size as usize)?);
@@ -78,10 +76,6 @@ impl Module {
             match section_id {
                 Section::Type => self.decode_type_section(&mut section)?,
                 _ => todo!()
-            }
-
-            if decoder.eof() {
-                break;
             }
         }
 
