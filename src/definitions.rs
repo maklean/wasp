@@ -130,6 +130,27 @@ pub struct Import {
     pub desc: Desc,
 }
 
+impl Import {
+    pub fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
+        // get module
+        let module_len = decoder.read_u32()? as usize;
+        let module = std::str::from_utf8(decoder.read_bytes(module_len)?)
+            .map_err(|_| DecodeError::InvalidUTF8Name)?
+            .to_string();
+
+        // get name
+        let name_len = decoder.read_u32()? as usize;
+        let name = std::str::from_utf8(decoder.read_bytes(name_len)?)
+            .map_err(|_| DecodeError::InvalidUTF8Name)?
+            .to_string();
+
+        // get desc
+        let desc = Desc::decode(decoder)?;
+
+        Ok(Self { module, name, desc })
+    }
+}
+
 /// Wasm module export outline.
 pub struct Export {
     /// Export name (unique).
@@ -148,15 +169,49 @@ pub struct TableType {
     pub elem_type: ElemType,
 }
 
+impl TableType {
+    fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
+        let elem_type = ElemType::try_from(decoder.read_byte()?)?;
+        let limits = Limits::decode(decoder)?;
+
+        Ok(Self { limits, elem_type })
+    }
+}
+
 /// Details the minimum and (optional) maximum size of a definition (mainly for tables and linear memories).
 pub struct Limits {
     pub min: u32,
     pub max: Option<u32>,
 }
 
+impl Limits {
+    const FLAG_MAX_MISSING: u8 = 0x00;
+    const FLAG_MAX_PRESENT: u8 = 0x01;
+
+    fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
+        // return Limits instance based on flag
+        match decoder.read_byte()? {
+            Self::FLAG_MAX_MISSING => Ok(Self { min: decoder.read_u32()?, max: None }),
+            Self::FLAG_MAX_PRESENT => Ok(Self { min: decoder.read_u32()?, max: Some(decoder.read_u32()?) }),
+            _ => Err(DecodeError::InvalidLimitsFlag)
+        }
+    }
+}
+
 /// Types of elements in a table (In Wasm 1.0, the only ElemType is a function reference / index to a Func).
 pub enum ElemType {
     FuncRef,
+}
+
+impl TryFrom<u8> for ElemType {
+    type Error = DecodeError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0x70 => Ok(Self::FuncRef),
+            _ => Err(DecodeError::InvalidElemType),
+        }
+    }
 }
 
 /// Description/schema of a global variable.
@@ -165,7 +220,16 @@ pub struct GlobalType {
     pub val_type: ValType,
 
     /// Mutability of the global.
-    pub mutable: Mutability,
+    pub mutability: Mutability,
+}
+
+impl GlobalType {
+    fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
+        let val_type = ValType::try_from(decoder.read_byte()?)?;
+        let mutability = Mutability::try_from(decoder.read_byte()?)?;
+
+        Ok(Self { val_type, mutability })
+    }
 }
 
 /// Details the possible mutabilities of data.
@@ -177,24 +241,48 @@ pub enum Mutability {
     Var,
 }
 
+impl TryFrom<u8> for Mutability {
+    type Error = DecodeError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0x00 => Ok(Self::Const),
+            0x01 => Ok(Self::Var),
+            _ => Err(DecodeError::InvalidMutability)
+        }
+    }
+}
+
 /// Types of imports/exports.
 pub enum Desc {
     /// Function index.
     Func(u32),
 
     /// Table index.
-    Table(u32),
+    Table(TableType),
 
     /// Memory index.
-    Mem(u32),
+    Mem(Limits),
 
     /// Global Index.
-    Global(u32),
+    Global(GlobalType),
+}
+
+impl Desc {
+    fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
+        match decoder.read_byte()? {
+            0x00 => Ok(Self::Func(decoder.read_u32()?)),
+            0x01 => Ok(Self::Table(TableType::decode(decoder)?)),
+            0x02 => Ok(Self::Mem(Limits::decode(decoder)?)),
+            0x03 => Ok(Self::Global(GlobalType::decode(decoder)?)),
+            _ => Err(DecodeError::InvalidDesc),
+        }
+    }
 }
 
 /// Wasm module section
 #[repr(u8)]
-#[derive(PartialEq)]
+#[derive(PartialEq, PartialOrd)]
 pub enum Section {
     Custom,
     Type,
@@ -227,7 +315,7 @@ impl TryFrom<u8> for Section {
             0x09 => Ok(Section::Element),
             0x0A => Ok(Section::Code),
             0x0B => Ok(Section::Data),
-            _ => Err(DecodeError::MalformedInteger),
+            _ => Err(DecodeError::InvalidSectionId),
         }
     }
 }

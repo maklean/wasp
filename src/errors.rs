@@ -8,4 +8,10 @@ pub enum DecodeError {
     InvalidFunctionType,
     InvalidValType,
     InvalidFunctionTypeResultCount,
+    InvalidSectionOrder,
+    InvalidUTF8Name,
+    InvalidDesc,
+    InvalidElemType,
+    InvalidLimitsFlag,
+    InvalidMutability,
 }

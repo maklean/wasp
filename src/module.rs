@@ -51,9 +51,7 @@ impl Module {
             return Err(DecodeError::InvalidSpecificationVersion);
         }
 
-        let mut this = Self {
-            ..Default::default()
-        };
+        let mut this: Module = Default::default();
 
         // decode sections
         this.decode_sections(&mut decoder)?;
@@ -63,6 +61,8 @@ impl Module {
 
     /// Decodes each section in the module.
     fn decode_sections(&mut self, decoder: &mut Decoder) -> Result<(), DecodeError> {
+        let mut last_section_id = Section::Custom;
+
         while !decoder.eof() {
             let section_id: Section = Section::try_from(decoder.read_byte()?)?;
             let section_size = decoder.read_u32()?;
@@ -73,10 +73,18 @@ impl Module {
                 continue;
             }
 
+            // excluding custom sections, section IDs have to appear in a monotonic non-decreasing order
+            if last_section_id >= section_id {
+                return Err(DecodeError::InvalidSectionOrder);
+            }
+
             match section_id {
                 Section::Type => self.decode_type_section(&mut section)?,
+                Section::Import => self.decode_import_section(&mut section)?,
                 _ => todo!()
             }
+
+            last_section_id = section_id;
         }
 
         Ok(())
@@ -84,11 +92,21 @@ impl Module {
 
     /// Decodes the type section in the module.
     fn decode_type_section(&mut self, decoder: &mut Decoder) -> Result<(), DecodeError> {
-        // Get number of function types
-        let n = decoder.read_u32()?;
+        let nun_func_types = decoder.read_u32()?;
 
-        for _ in 0..n {
+        for _ in 0..nun_func_types {
             self.types.push(FuncType::decode(decoder)?);
+        }
+
+        Ok(())
+    }
+
+    /// Decodes the import section in the module.
+    fn decode_import_section(&mut self, decoder: &mut Decoder) -> Result<(), DecodeError> {
+        let num_imports = decoder.read_u32()?;
+
+        for _ in 0..num_imports {
+            self.imports.push(Import::decode(decoder)?);
         }
 
         Ok(())
@@ -192,5 +210,104 @@ mod tests {
         ];
 
         assert!(Module::decode(&bytes).is_err_and(|e| e == DecodeError::InvalidFunctionType));
+    }
+
+    #[test]
+    fn decode_import_section_func() {
+        let bytes = [
+            0x00, 0x61, 0x73, 0x6d, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x02,                   // import section id
+            0x0B,                   // section size
+
+            0x01,                   // 1 import
+
+            // import "env"."add" (func type index 0)
+            0x03, 0x65, 0x6e, 0x76, // module name len=3, "env"
+            0x03, 0x61, 0x64, 0x64, // import name len=3, "add"
+            0x00,                   // desc: func
+            0x00,                   // type index: 0
+        ];
+
+        let module = Module::decode(&bytes).unwrap();
+        assert_eq!(module.imports.len(), 1);
+        assert_eq!(module.imports[0].module, "env");
+        assert_eq!(module.imports[0].name, "add");
+        assert!(matches!(module.imports[0].desc, Desc::Func(0)));
+    }
+
+    #[test]
+    fn decode_import_section_global() {
+        let bytes = [
+            0x00, 0x61, 0x73, 0x6d, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x02,                   // import section id
+            0x0A,                   // section size
+
+            0x01,                   // 1 import
+
+            // import "env"."g" (global i32 const)
+            0x03, 0x65, 0x6e, 0x76, // module name len=3, "env"
+            0x01, 0x67,             // import name len=1, "g"
+            0x03,                   // desc: global
+            0x7f,                   // val type: i32
+            0x00,                   // mutability: const
+        ];
+
+        let module = Module::decode(&bytes).unwrap();
+        assert_eq!(module.imports.len(), 1);
+        assert_eq!(module.imports[0].module, "env");
+        assert_eq!(module.imports[0].name, "g");
+
+        match &module.imports[0].desc {
+            Desc::Global(g) => {
+                assert!(matches!(g.val_type, ValType::I32));
+                assert!(matches!(g.mutability, Mutability::Const));
+            }
+            _ => panic!("expected global desc"),
+        }
+    }
+
+    #[test]
+    fn decode_import_section_invalid_desc() {
+        let bytes = [
+            0x00, 0x61, 0x73, 0x6d, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x02,                   // import section id
+            0x08,                   // section size
+
+            0x01,                   // 1 import
+
+            // import "env"."x" (invalid desc)
+            0x03, 0x65, 0x6e, 0x76, // module name len=3, "env"
+            0x01, 0x78,             // import name len=1, "x"
+            0x04,                   // desc: invalid
+        ];
+
+        assert!(Module::decode(&bytes)
+            .is_err_and(|e| e == DecodeError::InvalidDesc));
+    }
+
+    #[test]
+    fn decode_import_section_invalid_utf8() {
+        let bytes = [
+            0x00, 0x61, 0x73, 0x6d, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x02,                   // import section id
+            0x05,                   // section size
+
+            0x01,                   // 1 import
+
+            // invalid UTF-8 module name
+            0x02, 0xFF, 0xFE,       // module name len=2, invalid UTF-8
+            0x01, 0x78,             // import name len=1, "x"
+        ];
+
+        assert!(Module::decode(&bytes)
+            .is_err_and(|e| e == DecodeError::InvalidUTF8Name));
     }
 }
