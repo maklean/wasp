@@ -95,7 +95,9 @@ impl Module {
 
     /// Decodes the type section in the module.
     fn decode_type_section(&mut self, decoder: &mut Decoder) -> Result<(), DecodeError> {
-        let num_func_types = decoder.read_u32()?;
+        let num_func_types = decoder.read_u32()? as usize;
+
+        self.types.reserve_exact(num_func_types);
 
         for _ in 0..num_func_types {
             self.types.push(FuncType::decode(decoder)?);
@@ -106,7 +108,9 @@ impl Module {
 
     /// Decodes the import section in the module.
     fn decode_import_section(&mut self, decoder: &mut Decoder) -> Result<(), DecodeError> {
-        let num_imports = decoder.read_u32()?;
+        let num_imports = decoder.read_u32()? as usize;
+
+        self.imports.reserve_exact(num_imports);
 
         for _ in 0..num_imports {
             self.imports.push(Import::decode(decoder)?);
@@ -117,7 +121,9 @@ impl Module {
 
     /// Decodes the function section in the module.
     fn decode_function_section(&mut self, decoder: &mut Decoder) -> Result<(), DecodeError> {
-        let num_funcs = decoder.read_u32()?;
+        let num_funcs = decoder.read_u32()? as usize;
+
+        self.funcs.reserve_exact(num_funcs);
 
         for _ in 0..num_funcs {
             self.funcs.push(Func::decode_type_idx(decoder)?);
@@ -128,12 +134,14 @@ impl Module {
 
     /// Decodes the table section in the module.
     fn decode_table_section(&mut self, decoder: &mut Decoder) -> Result<(), DecodeError> {
-        let num_tables = decoder.read_u32()?;
+        let num_tables = decoder.read_u32()? as usize;
 
         // there's only at most one table allowed in Wasm 1.0
         if num_tables > 1 {
             return Err(DecodeError::InvalidTableCount);
         }
+
+        self.tables.reserve_exact(num_tables);
 
         for _ in 0..num_tables {
             self.tables.push(Table::decode(decoder)?);
@@ -144,12 +152,14 @@ impl Module {
 
     /// Decodes the memory section in the module.
     fn decode_memory_section(&mut self, decoder: &mut Decoder) -> Result<(), DecodeError> {
-        let num_memories = decoder.read_u32()?;
+        let num_memories = decoder.read_u32()? as usize;
 
         // there's only at most one linear memory allowed in Wasm 1.0
         if num_memories > 1 {
             return Err(DecodeError::InvalidMemoryCount);
         }
+
+        self.mems.reserve_exact(num_memories);
 
         for _ in 0..num_memories {
             self.mems.push(Mem::decode(decoder)?);
