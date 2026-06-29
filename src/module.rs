@@ -84,31 +84,11 @@ impl Module {
 
     /// Decodes the type section in the module.
     fn decode_type_section(&mut self, decoder: &mut Decoder) -> Result<(), DecodeError> {
+        // Get number of function types
         let n = decoder.read_u32()?;
 
         for _ in 0..n {
-            decoder.match_byte(0x60, DecodeError::InvalidFunctionType)?;
-
-            // Get parameters
-            let param_count = decoder.read_u32()? as usize;
-            let params: Vec<ValType> = decoder.read_bytes(param_count)?
-                .iter()
-                .map(|&b| ValType::try_from(b))
-                .collect::<Result<Vec<_>, _>>()?;
-
-            // Get function result (there should only be at most one)
-            let results_count = decoder.read_u32()? as usize;
-            if results_count > 1 {
-                return Err(DecodeError::InvalidFunctionTypeResultCount);
-            }
-
-            let results: Vec<ValType> = decoder.read_bytes(results_count)?
-                .iter()
-                .map(|&b| ValType::try_from(b))
-                .collect::<Result<Vec<_>, _>>()?;
-
-            // Add function type to module types
-            self.types.push(FuncType { params, results });
+            self.types.push(FuncType::decode(decoder)?);
         }
 
         Ok(())

@@ -1,4 +1,4 @@
-use crate::errors::DecodeError;
+use crate::{decoder::Decoder, errors::DecodeError};
 
 /// Types that Wasm code can use for its values.
 pub enum ValType {
@@ -29,6 +29,36 @@ pub struct FuncType {
 
     /// Function results.
     pub results: Vec<ValType>,
+}
+
+impl FuncType {
+    const MARKER: u8 = 0x60;
+
+    /// Decodes a single `FuncType` from a sequence of bytes and returns an instance if successful.
+    pub fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
+        // Sequence should start with a 0x60 marker
+        decoder.match_byte(FuncType::MARKER, DecodeError::InvalidFunctionType)?;
+
+        // Get parameters
+        let param_count = decoder.read_u32()? as usize;
+        let params: Vec<ValType> = decoder.read_bytes(param_count)?
+            .iter()
+            .map(|&b| ValType::try_from(b))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // Get function result (there should only be at most one)
+        let results_count = decoder.read_u32()? as usize;
+        if results_count > 1 {
+            return Err(DecodeError::InvalidFunctionTypeResultCount);
+        }
+
+        let results: Vec<ValType> = decoder.read_bytes(results_count)?
+            .iter()
+            .map(|&b| ValType::try_from(b))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(Self { params, results })
+    }
 }
 
 /// Wasm module's function outline.
