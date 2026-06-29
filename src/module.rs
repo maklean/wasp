@@ -92,9 +92,9 @@ impl Module {
 
     /// Decodes the type section in the module.
     fn decode_type_section(&mut self, decoder: &mut Decoder) -> Result<(), DecodeError> {
-        let nun_func_types = decoder.read_u32()?;
+        let num_func_types = decoder.read_u32()?;
 
-        for _ in 0..nun_func_types {
+        for _ in 0..num_func_types {
             self.types.push(FuncType::decode(decoder)?);
         }
 
