@@ -14,4 +14,6 @@ pub enum DecodeError {
     InvalidElemType,
     InvalidLimitsFlag,
     InvalidMutability,
+    InvalidTableCount,
+    InvalidMemoryCount,
 }

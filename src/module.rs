@@ -81,6 +81,9 @@ impl Module {
             match section_id {
                 Section::Type => self.decode_type_section(&mut section)?,
                 Section::Import => self.decode_import_section(&mut section)?,
+                Section::Function => self.decode_function_section(&mut section)?,
+                Section::Table => self.decode_table_section(&mut section)?,
+                Section::Memory => self.decode_memory_section(&mut section)?,
                 _ => todo!()
             }
 
@@ -107,6 +110,49 @@ impl Module {
 
         for _ in 0..num_imports {
             self.imports.push(Import::decode(decoder)?);
+        }
+
+        Ok(())
+    }
+
+    /// Decodes the function section in the module.
+    fn decode_function_section(&mut self, decoder: &mut Decoder) -> Result<(), DecodeError> {
+        let num_funcs = decoder.read_u32()?;
+
+        for _ in 0..num_funcs {
+            self.funcs.push(Func::decode_type_idx(decoder)?);
+        }
+
+        Ok(())
+    }
+
+    /// Decodes the table section in the module.
+    fn decode_table_section(&mut self, decoder: &mut Decoder) -> Result<(), DecodeError> {
+        let num_tables = decoder.read_u32()?;
+
+        // there's only at most one table allowed in Wasm 1.0
+        if num_tables > 1 {
+            return Err(DecodeError::InvalidTableCount);
+        }
+
+        for _ in 0..num_tables {
+            self.tables.push(Table::decode(decoder)?);
+        }
+
+        Ok(())
+    }
+
+    /// Decodes the memory section in the module.
+    fn decode_memory_section(&mut self, decoder: &mut Decoder) -> Result<(), DecodeError> {
+        let num_memories = decoder.read_u32()?;
+
+        // there's only at most one linear memory allowed in Wasm 1.0
+        if num_memories > 1 {
+            return Err(DecodeError::InvalidMemoryCount);
+        }
+
+        for _ in 0..num_memories {
+            self.mems.push(Mem::decode(decoder)?);
         }
 
         Ok(())
@@ -309,5 +355,208 @@ mod tests {
 
         assert!(Module::decode(&bytes)
             .is_err_and(|e| e == DecodeError::InvalidUTF8Name));
+    }
+
+    #[test]
+    fn decode_table_section() {
+        let bytes = [
+            0x00, 0x61, 0x73, 0x6d, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x04,                   // table section id
+            0x04,                   // section size
+
+            0x01,                   // 1 table
+
+            0x70,                   // elem type: funcref
+            0x00,                   // max absent
+            0x0A,                   // min = 10
+        ];
+
+        let module = Module::decode(&bytes).unwrap();
+
+        assert_eq!(module.tables.len(), 1);
+        assert!(matches!(module.tables[0].table_type.elem_type, ElemType::FuncRef));
+        assert_eq!(module.tables[0].table_type.limits.min, 10);
+        assert_eq!(module.tables[0].table_type.limits.max, None);
+    }
+
+    #[test]
+    fn decode_table_section_with_max() {
+        let bytes = [
+            0x00, 0x61, 0x73, 0x6d, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x04,                   // table section id
+            0x05,                   // section size
+
+            0x01,                   // 1 table
+
+            0x70,                   // elem type: funcref
+            0x01,                   // max present
+            0x05,                   // min = 5
+            0x0A,                   // max = 10
+        ];
+
+        let module = Module::decode(&bytes).unwrap();
+
+        assert_eq!(module.tables.len(), 1);
+        assert!(matches!(module.tables[0].table_type.elem_type, ElemType::FuncRef));
+        assert_eq!(module.tables[0].table_type.limits.min, 5);
+        assert_eq!(module.tables[0].table_type.limits.max, Some(10));
+    }
+
+    #[test]
+    fn decode_table_section_invalid_elem_type() {
+        let bytes = [
+            0x00, 0x61, 0x73, 0x6d, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x04,                   // table section id
+            0x04,                   // section size
+
+            0x01,                   // 1 table
+
+            0x71,                   // invalid elem type
+            0x00,                   // max absent
+            0x01,                   // min
+        ];
+
+        assert!(Module::decode(&bytes)
+            .is_err_and(|e| e == DecodeError::InvalidElemType));
+    }
+
+    #[test]
+    fn decode_table_section_invalid_limits_flag() {
+        let bytes = [
+            0x00, 0x61, 0x73, 0x6d, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x04,                   // table section id
+            0x04,                   // section size
+
+            0x01,                   // 1 table
+
+            0x70,                   // elem type: funcref
+            0x02,                   // invalid limits flag
+            0x01,                   // min
+        ];
+
+        assert!(Module::decode(&bytes)
+            .is_err_and(|e| e == DecodeError::InvalidLimitsFlag));
+    }
+
+    #[test]
+    fn decode_table_section_multiple() {
+        let bytes = [
+            0x00, 0x61, 0x73, 0x6d, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x04,                   // table section id
+            0x07,                   // section size
+
+            0x02,                   // 2 tables
+
+            // table 1
+            0x70,                   // elem type: funcref
+            0x00,                   // max absent
+            0x01,                   // min = 1
+
+            // table 2
+            0x70,                   // elem type: funcref
+            0x00,                   // max absent
+            0x02,                   // min = 2
+        ];
+
+        assert!(Module::decode(&bytes)
+            .is_err_and(|e| e == DecodeError::InvalidTableCount));
+    }
+
+    #[test]
+    fn decode_memory_section() {
+        let bytes = [
+            0x00, 0x61, 0x73, 0x6d, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x05,                   // memory section id
+            0x03,                   // section size
+
+            0x01,                   // 1 memory
+
+            0x00,                   // max absent
+            0x0A,                   // min = 10
+        ];
+
+        let module = Module::decode(&bytes).unwrap();
+
+        assert_eq!(module.mems.len(), 1);
+        assert_eq!(module.mems[0].mem_type.min, 10);
+        assert_eq!(module.mems[0].mem_type.max, None);
+    }
+
+    #[test]
+    fn decode_memory_section_with_max() {
+        let bytes = [
+            0x00, 0x61, 0x73, 0x6d, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x05,                   // memory section id
+            0x04,                   // section size
+
+            0x01,                   // 1 memory
+
+            0x01,                   // max present
+            0x05,                   // min = 5
+            0x0A,                   // max = 10
+        ];
+
+        let module = Module::decode(&bytes).unwrap();
+
+        assert_eq!(module.mems.len(), 1);
+        assert_eq!(module.mems[0].mem_type.min, 5);
+        assert_eq!(module.mems[0].mem_type.max, Some(10));
+    }
+
+    #[test]
+    fn decode_memory_section_invalid_limits_flag() {
+        let bytes = [
+            0x00, 0x61, 0x73, 0x6d, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x05,                   // memory section id
+            0x03,                   // section size
+
+            0x01,                   // 1 memory
+
+            0x02,                   // invalid limits flag
+            0x01,                   // min
+        ];
+
+        assert!(Module::decode(&bytes)
+            .is_err_and(|e| e == DecodeError::InvalidLimitsFlag));
+    }
+
+    #[test]
+    fn decode_memory_section_multiple() {
+        let bytes = [
+            0x00, 0x61, 0x73, 0x6d, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x05,                   // memory section id
+            0x05,                   // section size
+
+            0x02,                   // 2 memories
+
+            // memory 1
+            0x00,                   // max absent
+            0x01,                   // min = 1
+
+            // memory 2
+            0x00,                   // max absent
+            0x02,                   // min = 2
+        ];
+
+        assert!(Module::decode(&bytes)
+            .is_err_and(|e| e == DecodeError::InvalidMemoryCount));
     }
 }

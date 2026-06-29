@@ -61,6 +61,7 @@ impl FuncType {
     }
 }
 
+#[derive(Default)]
 /// Wasm module's function outline.
 pub struct Func {
     /// Index to the function's signature in the module's `types` vector.
@@ -73,16 +74,42 @@ pub struct Func {
     // pub body: Vec<Instr>,
 }
 
+impl Func {
+    /// Returns a `Func` with only the type_idx being set/decoded.
+    pub fn decode_type_idx(decoder: &mut Decoder) -> Result<Self, DecodeError> {
+        Ok(Self {
+            type_idx: decoder.read_u32()?,
+            ..Default::default()
+        })
+    }
+}
+
 /// Wasm module's table outline.
 pub struct Table {
     /// Table's details.
     pub table_type: TableType,
 }
 
+impl Table {
+    pub fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
+        let table_type = TableType::decode(decoder)?;
+
+        Ok(Self { table_type })
+    }
+}
+
 /// Wasm module's linear memory outline.
 pub struct Mem {
     /// Min (initial) and max size of the memory.
     pub mem_type: Limits,
+}
+
+impl Mem {
+    pub fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
+        let mem_type = Limits::decode(decoder)?;
+
+        Ok(Self { mem_type })
+    }
 }
 
 /// Wasm module's global variable outline.
