@@ -91,6 +91,7 @@ pub struct Table {
 }
 
 impl Table {
+    /// Decodes a `Table` from a sequence of bytes.
     pub fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
         let table_type = TableType::decode(decoder)?;
 
@@ -105,6 +106,7 @@ pub struct Mem {
 }
 
 impl Mem {
+    /// Decodes a linear memory from a sequence of bytes.
     pub fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
         let mem_type = Limits::decode(decoder)?;
 
@@ -172,6 +174,7 @@ pub struct Import {
 }
 
 impl Import {
+    /// Decodes an `Import` from a sequence of bytes.
     pub fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
         // get module
         let module_len = decoder.read_u32()? as usize;
@@ -211,6 +214,7 @@ pub struct TableType {
 }
 
 impl TableType {
+    /// Decodes a `TableType` from a sequence of bytes.
     fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
         let elem_type = ElemType::try_from(decoder.read_byte()?)?;
         let limits = Limits::decode(decoder)?;
@@ -229,6 +233,7 @@ impl Limits {
     const FLAG_MAX_MISSING: u8 = 0x00;
     const FLAG_MAX_PRESENT: u8 = 0x01;
 
+    /// Decodes a `Limits` from a sequence of bytes, returns the correct variant based on if the maximum is present or not.
     fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
         // return Limits instance based on flag
         match decoder.read_byte()? {
@@ -265,6 +270,7 @@ pub struct GlobalType {
 }
 
 impl GlobalType {
+    /// Decodes a `GlobalType` from a sequence of bytes.
     fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
         let val_type = ValType::try_from(decoder.read_byte()?)?;
         let mutability = Mutability::try_from(decoder.read_byte()?)?;
@@ -310,6 +316,7 @@ pub enum Desc {
 }
 
 impl Desc {
+    /// Decodes a `Desc` from a sequence of bytes.
     fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
         match decoder.read_byte()? {
             0x00 => Ok(Self::Func(decoder.read_u32()?)),

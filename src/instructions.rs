@@ -1,10 +1,12 @@
 use crate::{decoder::Decoder, definitions::ValType, errors::DecodeError};
 
+/// Declares the end of an instruction sequence.
 const END_MARKER: u8 = 0x0B;
 
 /// Wasm expression.
 #[derive(Default)]
 pub struct Expr {
+    /// Sequence of instructions.
     pub instructions: Vec<Instr>,
 }
 
