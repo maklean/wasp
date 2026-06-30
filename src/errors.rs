@@ -26,6 +26,7 @@ pub enum DecodeError {
     InvalidInstr,
     InvalidNonConstExpr,
     InvalidTableIndex,
+    InvalidMemoryIndex,
     InvalidFunctionCount,
     MalformedCodeSize,
 }

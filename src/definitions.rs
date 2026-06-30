@@ -88,7 +88,7 @@ impl Func {
     pub fn decode_locals_body(&mut self, decoder: &mut Decoder) -> Result<(), DecodeError> {
         let num_locals_group = decoder.read_u32()?  as usize;
         self.locals.reserve_exact(num_locals_group);
-        
+
         for _ in 0..num_locals_group {
             let n = decoder.read_u32()? as usize;
             let val_type = ValType::try_from(decoder.read_byte()?)?;
@@ -208,6 +208,34 @@ pub struct Data {
 
     /// Bytes to write into the memory slots from the offset.
     pub init: Vec<u8>,
+}
+
+impl Data {
+    /// Decodes a data segment from a sequence of bytes.
+    pub fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
+        let mem_idx = decoder.read_u32()?;
+
+        // only one linear memory is allowed in Wasm 1.0
+        if mem_idx != 0 {
+            return Err(DecodeError::InvalidMemoryIndex);
+        }
+
+        let offset = Expr::decode(decoder)?;
+
+        // the offset expression has to be a constant expression
+        if !offset.is_const() {
+            return Err(DecodeError::InvalidNonConstExpr);
+        }
+
+        let num_bytes = decoder.read_u32()? as usize;
+        let mut init: Vec<u8> = Vec::with_capacity(num_bytes);
+
+        for _ in 0..num_bytes {
+            init.push(decoder.read_byte()?);
+        }
+
+        Ok(Self { mem_idx, offset, init })
+    }
 }
 
 /// Wasm module import outline.

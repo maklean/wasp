@@ -89,7 +89,8 @@ impl Module {
                 Section::Start => self.start = Some(section.read_u32()?),
                 Section::Element => self.decode_element_section(&mut section)?,
                 Section::Code => self.decode_code_section(&mut section)?,
-                _ => todo!()
+                Section::Data => self.decode_data_section(&mut section)?,
+                Section::Custom => (),
             }
 
             last_section_id = section_id;
@@ -234,6 +235,19 @@ impl Module {
             if decoder.pos() - start != size {
                 return Err(DecodeError::MalformedCodeSize);
             }
+        }
+
+        Ok(())
+    }
+
+    /// Decodes the data section in the module.
+    fn decode_data_section(&mut self, decoder: &mut Decoder) -> Result<(), DecodeError> {
+        let num_data = decoder.read_u32()? as usize;
+
+        self.data.reserve_exact(num_data);
+
+        for _ in 0..num_data {
+            self.data.push(Data::decode(decoder)?);
         }
 
         Ok(())
@@ -1056,5 +1070,114 @@ mod tests {
 
         assert!(Module::decode(&bytes)
             .is_err_and(|e| e == DecodeError::InvalidFunctionCount));
+    }
+
+    #[test]
+    fn decode_data_section() {
+        let bytes = [
+            0x00, 0x61, 0x73, 0x6d, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x0B,                   // data section id
+            0x08,                   // section size
+
+            0x01,                   // 1 data segment
+
+            0x00,                   // memory index: 0
+            0x41, 0x05,             // i32.const 5
+            0x0B,                   // end
+            0x02,                   // 2 bytes of data
+            0xAA, 0xBB,             // init data
+        ];
+
+        let module = Module::decode(&bytes).unwrap();
+
+        assert_eq!(module.data.len(), 1);
+        assert_eq!(module.data[0].mem_idx, 0);
+        assert!(matches!(module.data[0].offset.instructions[0], Instr::I32Const(5)));
+        assert_eq!(module.data[0].init.len(), 2);
+        assert_eq!(module.data[0].init, vec![0xAA, 0xBB]);
+    }
+
+    #[test]
+    fn decode_data_section_invalid_memory_index() {
+        let bytes = [
+            0x00, 0x61, 0x73, 0x6d, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x0B,                   // data section id
+            0x06,                   // section size
+
+            0x01,                   // 1 data segment
+
+            0x01,                   // invalid memory index: 1
+            0x41, 0x00,             // i32.const 0
+            0x0B,                   // end
+            0x00,                   // 0 bytes of data
+        ];
+
+        assert!(Module::decode(&bytes)
+            .is_err_and(|e| e == DecodeError::InvalidMemoryIndex));
+    }
+
+    #[test]
+    fn decode_data_section_non_const_expr() {
+        let bytes = [
+            0x00, 0x61, 0x73, 0x6d, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x0B,                   // data section id
+            0x07,                   // section size
+
+            0x01,                   // 1 data segment
+
+            0x00,                   // memory index: 0
+            0x41, 0x01,             // i32.const 1
+            0x1A,                   // drop (makes it non-const)
+            0x0B,                   // end
+            0x00,                   // 0 bytes of data
+        ];
+
+        assert!(Module::decode(&bytes)
+            .is_err_and(|e| e == DecodeError::InvalidNonConstExpr));
+    }
+
+    #[test]
+    fn decode_data_section_multiple() {
+        let bytes = [
+            0x00, 0x61, 0x73, 0x6d, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x0B,                   // data section id
+            0x0E,                   // section size
+
+            0x02,                   // 2 data segments
+
+            // segment 1
+            0x00,                   // memory index: 0
+            0x41, 0x00,             // i32.const 0
+            0x0B,                   // end
+            0x01,                   // 1 byte of data
+            0xFF,                   // init data
+
+            // segment 2
+            0x00,                   // memory index: 0
+            0x41, 0x0A,             // i32.const 10
+            0x0B,                   // end
+            0x02,                   // 2 bytes of data
+            0xAA, 0xBB,             // init data
+        ];
+
+        let module = Module::decode(&bytes).unwrap();
+
+        assert_eq!(module.data.len(), 2);
+
+        assert_eq!(module.data[0].mem_idx, 0);
+        assert!(matches!(module.data[0].offset.instructions[0], Instr::I32Const(0)));
+        assert_eq!(module.data[0].init, vec![0xFF]);
+
+        assert_eq!(module.data[1].mem_idx, 0);
+        assert!(matches!(module.data[1].offset.instructions[0], Instr::I32Const(10)));
+        assert_eq!(module.data[1].init, vec![0xAA, 0xBB]);
     }
 }
