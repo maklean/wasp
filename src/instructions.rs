@@ -1,8 +1,28 @@
 use crate::{decoder::Decoder, definitions::ValType, errors::DecodeError};
 
-/// Wasm expression outline.
-pub type Expr = Vec<Instr>; // should be ended with 0x0B byte.
+const END_MARKER: u8 = 0x0B;
 
+/// Wasm expression.
+#[derive(Default)]
+pub struct Expr {
+    pub instructions: Vec<Instr>,
+}
+
+impl Expr {
+    /// Returns whether the expression is a constant expression.
+    pub fn is_const(&self) -> bool {
+        self.instructions
+            .iter()
+            .all(|i| matches!(i, Instr::I32Const(_) | Instr::I64Const(_) | Instr::F32Const(_) | Instr::F64Const(_) | Instr::GlobalGet(_)))
+    }
+
+    /// Decodes an expression.
+    pub fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
+        Ok(Self { instructions: Instr::decode_sequence(decoder)? })
+    }
+}
+
+/// Wasm instructions.
 pub enum Instr {
     // Control Instructions
     Unreachable,
@@ -186,8 +206,7 @@ pub enum Instr {
 }
 
 impl Instr {
-    const CTRL_END_MARKER: u8 = 0x0B;
-
+    /// Decodes an instruction.
     pub fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
         match decoder.read_byte()? {
             // Control Instructions
@@ -398,12 +417,12 @@ impl Instr {
     fn decode_sequence(decoder: &mut Decoder) -> Result<Vec<Instr>, DecodeError> {
         let mut instr: Vec<Instr> = Vec::new();
 
-        while decoder.peek_byte()? != Self::CTRL_END_MARKER {
+        while decoder.peek_byte()? != END_MARKER {
             instr.push(Self::decode(decoder)?);
         }
 
-        // read 0x0B (CTRL_END_MARKER)
-        decoder.match_byte(Self::CTRL_END_MARKER, DecodeError::ExpectedEndOfCtrlInstr)?;
+        // read 0x0B (END_MARKER)
+        decoder.match_byte(END_MARKER, DecodeError::ExpectedEndOfInstrSeq)?;
 
         Ok(instr)
     }
@@ -416,7 +435,7 @@ impl Instr {
         let mut else_instr: Vec<Instr> = Vec::new();
 
         // check for end marker or else opcode
-        while !matches!(decoder.peek_byte()?, Self::CTRL_END_MARKER | 0x05) {
+        while !matches!(decoder.peek_byte()?, END_MARKER | 0x05) {
             then_instr.push(Self::decode(decoder)?);
         }
 
@@ -425,13 +444,13 @@ impl Instr {
             // read 0x05 (else opcode)
             decoder.match_byte(0x05, DecodeError::InvalidIfThenInstr)?;
 
-            while decoder.peek_byte()? != Self::CTRL_END_MARKER {
+            while decoder.peek_byte()? != END_MARKER {
                 else_instr.push(Self::decode(decoder)?);
             }
         }
 
-        // read 0x0B (CTRL_END_MARKER)
-        decoder.match_byte(Self::CTRL_END_MARKER, DecodeError::ExpectedEndOfCtrlInstr)?;
+        // read 0x0B (END_MARKER)
+        decoder.match_byte(END_MARKER, DecodeError::ExpectedEndOfInstrSeq)?;
 
         Ok(Self::If(block_type, then_instr, else_instr))
     }
@@ -460,6 +479,7 @@ pub struct MemArg {
 }
 
 impl MemArg {
+    /// Decodes a `MemArg`.
     pub fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
         let align = decoder.read_u32()?;
         let offset = decoder.read_u32()?;

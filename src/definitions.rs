@@ -1,4 +1,4 @@
-use crate::{decoder::Decoder, errors::DecodeError};
+use crate::{decoder::Decoder, errors::DecodeError, instructions::Expr};
 
 /// Types that Wasm code can use for its values.
 pub enum ValType {
@@ -70,8 +70,8 @@ pub struct Func {
     /// Vector of mutable local variables and their types, function parameters are the first elements in the vector.
     pub locals: Vec<ValType>,
 
-    // /// Instruction sequence for the function.
-    // pub body: Vec<Instr>,
+    /// Instruction sequence for the function.
+    pub body: Expr,
 }
 
 impl Func {
@@ -117,8 +117,22 @@ pub struct Global {
     /// Global's details.
     pub global_type: GlobalType,
 
-    // /// Constant expression that initializes the global's value.
-    // pub init: ConstExpr,
+    /// Constant expression that initializes the global's value.
+    pub init: Expr,
+}
+
+impl Global {
+    /// Decodes a global variable.
+    pub fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
+        let global_type = GlobalType::decode(decoder)?;
+        let init = Expr::decode(decoder)?;
+
+        if !init.is_const() {
+            return Err(DecodeError::InvalidNonConstExpr);
+        }
+
+        Ok(Self { global_type, init })
+    }
 }
 
 /// A Wasm module element segment outline (initializes a subrange of a table).
@@ -126,8 +140,8 @@ pub struct Elem {
     /// Index of the table in the module (should always be 0 since only one table is allowed per module in Wasm 1.0).
     pub table_idx: u32,
 
-    // /// Offset into the table to start writing at.
-    // pub offset: ConstExpr,
+    /// Offset into the table to start writing at.
+    pub offset: Expr,
 
     /// Function indices to write into the table slots from the offset.
     pub init: Vec<u32>,
@@ -138,8 +152,8 @@ pub struct Data {
     /// Index of the memory in the module.
     pub mem_idx: u32,
 
-    // /// Offset into the memory to start writing at.
-    // pub offset: ConstExpr,
+    /// Offset into the memory to start writing at.
+    pub offset: Expr,
 
     /// Bytes to write into the memory slots from the offset.
     pub init: Vec<u8>,

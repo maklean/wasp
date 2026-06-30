@@ -84,6 +84,7 @@ impl Module {
                 Section::Function => self.decode_function_section(&mut section)?,
                 Section::Table => self.decode_table_section(&mut section)?,
                 Section::Memory => self.decode_memory_section(&mut section)?,
+                Section::Global => self.decode_global_section(&mut section)?,
                 _ => todo!()
             }
 
@@ -167,11 +168,26 @@ impl Module {
 
         Ok(())
     }
+
+    /// Decodes the global section in the module.
+    fn decode_global_section(&mut self, decoder: &mut Decoder) -> Result<(), DecodeError> {
+        let num_globals = decoder.read_u32()? as usize;
+
+        self.globals.reserve_exact(num_globals);
+
+        for _ in 0..num_globals {
+            self.globals.push(Global::decode(decoder)?);
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::instructions::Instr;
+
+use super::*;
 
     #[test]
     fn decode_empty_module() {
@@ -568,5 +584,92 @@ mod tests {
 
         assert!(Module::decode(&bytes)
             .is_err_and(|e| e == DecodeError::InvalidMemoryCount));
+    }
+
+    #[test]
+    fn test_decode_global_section() {
+        let bytes: &[u8] = &[
+            0x00, 0x61, 0x73, 0x6D, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x06, // global section
+            0x06, // section size
+
+            0x01, // number of globals
+
+            0x7F, // i32
+            0x00, // const
+            0x41, 0x2A, // i32.const 42
+            0x0B, // end
+        ];
+
+        let module = Module::decode(bytes).unwrap();
+
+        assert_eq!(module.globals.len(), 1);
+
+        assert!(matches!(module.globals[0].global_type.val_type, ValType::I32));
+        assert!(matches!(module.globals[0].global_type.mutability, Mutability::Const));
+
+        assert_eq!(module.globals[0].init.instructions.len(), 1);
+        assert!(matches!(module.globals[0].init.instructions[0], Instr::I32Const(42)));
+    }
+
+    #[test]
+    fn test_decode_multiple_globals() {
+        let bytes: &[u8] = &[
+            0x00, 0x61, 0x73, 0x6D, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x06, // global section
+            0x0B, // section size
+
+            0x02, // number of globals
+
+            0x7F, // i32
+            0x00, // const
+            0x41, 0x01, // i32.const 1
+            0x0B, // end
+
+            0x7E, // i64
+            0x01, // var
+            0x42, 0x02, // i64.const 2
+            0x0B, // end
+        ];
+
+        let module = Module::decode(bytes).unwrap();
+
+        assert_eq!(module.globals.len(), 2);
+
+        assert!(matches!(module.globals[0].global_type.val_type, ValType::I32));
+        assert!(matches!(module.globals[0].global_type.mutability, Mutability::Const));
+        assert!(matches!(module.globals[0].init.instructions[0], Instr::I32Const(1)));
+
+        assert!(matches!(module.globals[1].global_type.val_type, ValType::I64));
+        assert!(matches!(module.globals[1].global_type.mutability, Mutability::Var));
+        assert!(matches!(module.globals[1].init.instructions[0], Instr::I64Const(2)));
+    }
+
+    #[test]
+    fn test_decode_non_const_global_expr() {
+        let bytes: &[u8] = &[
+            0x00, 0x61, 0x73, 0x6D, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x06, // global section
+            0x07, // section size
+
+            0x01, // number of globals
+
+            0x7F, // i32
+            0x00, // const
+            0x41, 0x01, // i32.const 1
+            0x1A, // drop
+            0x0B, // end
+        ];
+
+        assert!(matches!(
+            Module::decode(bytes),
+            Err(DecodeError::InvalidNonConstExpr)
+        ));
     }
 }

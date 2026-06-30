@@ -18,9 +18,10 @@ pub enum DecodeError {
     InvalidTableCount,
     InvalidMemoryCount,
     InvalidIfThenInstr,
-    ExpectedEndOfCtrlInstr,
+    ExpectedEndOfInstrSeq,
     InvalidCallIndirectInstr,
     InvalidMemorySizeInstr,
     InvalidMemoryGrowInstr,
     InvalidInstr,
+    InvalidNonConstExpr,
 }
