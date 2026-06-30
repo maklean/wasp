@@ -16,4 +16,10 @@ pub enum DecodeError {
     InvalidMutability,
     InvalidTableCount,
     InvalidMemoryCount,
+    InvalidIfThenInstr,
+    ExpectedEndOfCtrlInstr,
+    InvalidCallIndirectInstr,
+    InvalidMemorySizeInstr,
+    InvalidMemoryGrowInstr,
+    InvalidInstr,
 }

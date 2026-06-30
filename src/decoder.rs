@@ -45,6 +45,15 @@ impl<'a> Decoder<'a> {
         Ok(slice)
     }
 
+    /// Peeks at the current byte, does not advance.
+    pub fn peek_byte(&self) -> Result<u8, DecodeError> {
+        if self.pos >= self.bytes.len() {
+            return Err(DecodeError::UnexpectedEof);
+        }
+
+        Ok(self.bytes[self.pos])
+    }
+
     /// Advances by one if the next byte matches the expected byte, otherwise the given error is returned.
     pub fn match_byte(&mut self, expect: u8, err: DecodeError) -> Result<(), DecodeError> {
         self.match_bytes(1, &[expect], err)
