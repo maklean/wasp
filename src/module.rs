@@ -88,6 +88,7 @@ impl Module {
                 Section::Export => self.decode_export_section(&mut section)?,
                 Section::Start => self.start = Some(section.read_u32()?),
                 Section::Element => self.decode_element_section(&mut section)?,
+                Section::Code => self.decode_code_section(&mut section)?,
                 _ => todo!()
             }
 
@@ -210,13 +211,39 @@ impl Module {
 
         Ok(())
     }
+
+    /// Decodes the code section in the module.
+    fn decode_code_section(&mut self, decoder: &mut Decoder) -> Result<(), DecodeError> {
+        let num_funcs = decoder.read_u32()? as usize;
+
+        // there should be an exact match
+        if num_funcs != self.funcs.len() {
+            println!("Here!");
+            return Err(DecodeError::InvalidFunctionCount);
+        } else {
+            println!("We good!");
+        }
+
+        for func_idx in 0..num_funcs {
+            let size = decoder.read_u32()? as usize;
+            let start = decoder.pos();
+
+            self.funcs[func_idx].decode_locals_body(decoder)?;
+
+            // we should have an exact size
+            if decoder.pos() - start != size {
+                return Err(DecodeError::MalformedCodeSize);
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::instructions::Instr;
-
-use super::*;
+    use super::*;
 
     #[test]
     fn decode_empty_module() {
@@ -935,5 +962,99 @@ use super::*;
         assert!(matches!(module.elem[1].offset.instructions[0], Instr::I32Const(10)));
         assert_eq!(module.elem[1].init.len(), 1);
         assert_eq!(module.elem[1].init[0], 15);
+    }
+
+    #[test]
+    fn decode_code_section() {
+        let bytes = [
+            0x00, 0x61, 0x73, 0x6d, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x03,                   // function section id
+            0x02,                   // section size
+            0x01,                   // 1 function declared
+            0x00,                   // type index 0
+
+            0x0A,                   // code section id
+            0x06,                   // section size
+            0x01,                   // 1 code entry
+
+            0x04,                   // function size: 4 bytes
+            0x01,                   // 1 local group
+            0x02,                   // 2 locals in this group
+            0x7F,                   // type: i32
+            0x0B,                   // end instruction
+        ];
+
+        let module = Module::decode(&bytes).unwrap();
+
+        assert_eq!(module.funcs.len(), 1);
+        
+        // Locals should be expanded from (count: 2, type: i32)
+        assert_eq!(module.funcs[0].locals.len(), 2);
+        assert!(matches!(module.funcs[0].locals[0], ValType::I32));
+        assert!(matches!(module.funcs[0].locals[1], ValType::I32));
+    }
+
+    #[test]
+    fn decode_code_section_malformed_size_too_small() {
+        let bytes = [
+            0x00, 0x61, 0x73, 0x6d, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x03, 0x02, 0x01, 0x00, // function section: 1 func
+
+            0x0A,                   // code section id
+            0x06,                   // section size
+            0x01,                   // 1 code entry
+
+            0x02,                   // function size: 2 bytes (WRONG, actual is 4)
+            0x01, 0x02, 0x7F, 0x0B, // 4 bytes of actual function data
+        ];
+
+        assert!(Module::decode(&bytes)
+            .is_err_and(|e| e == DecodeError::MalformedCodeSize));
+    }
+
+    #[test]
+    fn decode_code_section_malformed_size_too_large() {
+        let bytes = [
+            0x00, 0x61, 0x73, 0x6d, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x03, 0x02, 0x01, 0x00, // function section: 1 func
+
+            0x0A,                   // code section id
+            0x06,                   // section size
+            0x01,                   // 1 code entry
+
+            0x07,                   // function size: 7 bytes (WRONG, actual is 4)
+            0x01, 0x02, 0x7F, 0x0B, // 4 bytes of actual function data
+        ];
+
+        assert!(Module::decode(&bytes)
+            .is_err_and(|e| e == DecodeError::MalformedCodeSize));
+    }
+
+    #[test]
+    fn decode_code_section_invalid_function_count() {
+        let bytes = [
+            0x00, 0x61, 0x73, 0x6d, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x03, 0x02, 0x01, 0x00, // function section: 1 func
+
+            0x0A,                   // code section id
+            0x0B,                   // section size
+            0x02,                   // 2 code entries (WRONG, should match the 1 func above)
+
+            // entry 1
+            0x04, 0x01, 0x02, 0x7F, 0x0B, 
+            // entry 2
+            0x04, 0x01, 0x02, 0x7F, 0x0B, 
+        ];
+
+        assert!(Module::decode(&bytes)
+            .is_err_and(|e| e == DecodeError::InvalidFunctionCount));
     }
 }

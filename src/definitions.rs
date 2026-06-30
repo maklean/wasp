@@ -1,6 +1,7 @@
 use crate::{decoder::Decoder, errors::DecodeError, instructions::Expr};
 
 /// Types that Wasm code can use for its values.
+#[derive(Clone)]
 pub enum ValType {
     I32,
     I64,
@@ -81,6 +82,26 @@ impl Func {
             type_idx: decoder.read_u32()?,
             ..Default::default()
         })
+    }
+
+    /// Decodes and sets the local variables and body of a `Func`.
+    pub fn decode_locals_body(&mut self, decoder: &mut Decoder) -> Result<(), DecodeError> {
+        let num_locals_group = decoder.read_u32()?  as usize;
+        self.locals.reserve_exact(num_locals_group);
+        
+        for _ in 0..num_locals_group {
+            let n = decoder.read_u32()? as usize;
+            let val_type = ValType::try_from(decoder.read_byte()?)?;
+
+            // add 'n' of this ValType
+            for _ in 0..n {
+                self.locals.push(val_type.clone());
+            }
+        }
+
+        self.body = Expr::decode(decoder)?;
+
+        Ok(())
     }
 }
 

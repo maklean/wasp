@@ -13,6 +13,11 @@ impl<'a> Decoder<'a> {
         Self { bytes, pos: 0 }
     }
 
+    /// Returns the current position of the decoder.
+    pub fn pos(&self) -> usize {
+        self.pos
+    }
+
     /// Returns the amount of bytes left to read.
     pub fn len(&self) -> usize {
         self.bytes.len() - self.pos
