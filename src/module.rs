@@ -219,12 +219,9 @@ impl Module {
 
         // there should be an exact match
         if num_funcs != self.funcs.len() {
-            println!("Here!");
             return Err(DecodeError::InvalidFunctionCount);
-        } else {
-            println!("We good!");
         }
-
+        
         for func_idx in 0..num_funcs {
             let size = decoder.read_u32()? as usize;
             let start = decoder.pos();
