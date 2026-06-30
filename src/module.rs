@@ -68,7 +68,7 @@ impl Module {
             let section_size = decoder.read_u32()?;
             let mut section = Decoder::new(decoder.read_bytes(section_size as usize)?);
 
-            // skip custom section
+            // skip custom sections
             if section_id == Section::Custom {
                 continue;
             }
@@ -86,6 +86,7 @@ impl Module {
                 Section::Memory => self.decode_memory_section(&mut section)?,
                 Section::Global => self.decode_global_section(&mut section)?,
                 Section::Export => self.decode_export_section(&mut section)?,
+                Section::Start => self.start = Some(decoder.read_u32()?),
                 _ => todo!()
             }
 
