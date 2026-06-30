@@ -25,4 +25,5 @@ pub enum DecodeError {
     InvalidMemoryGrowInstr,
     InvalidInstr,
     InvalidNonConstExpr,
+    InvalidTableIndex,
 }

@@ -149,6 +149,34 @@ pub struct Elem {
     pub init: Vec<u32>,
 }
 
+impl Elem {
+    pub fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
+        let table_idx = decoder.read_u32()?;
+
+        // only one table is allowed in Wasm 1.0
+        if table_idx != 0 {
+            return Err(DecodeError::InvalidTableIndex);
+        }
+
+        let offset = Expr::decode(decoder)?;
+
+        // the offset expression has to be a constant expression
+        if !offset.is_const() {
+            return Err(DecodeError::InvalidNonConstExpr);
+        }
+
+        // get func indexes.
+        let num_funcs = decoder.read_u32()? as usize;
+        let mut init: Vec<u32> = Vec::with_capacity(num_funcs);
+
+        for _ in 0..num_funcs {
+            init.push(decoder.read_u32()?);
+        }
+
+        Ok(Self { table_idx, offset, init })
+    }
+}
+
 /// A wasm module data segment outline (initializes a subrange of a linear memory).
 pub struct Data {
     /// Index of the memory in the module.

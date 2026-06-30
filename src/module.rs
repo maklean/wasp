@@ -86,7 +86,8 @@ impl Module {
                 Section::Memory => self.decode_memory_section(&mut section)?,
                 Section::Global => self.decode_global_section(&mut section)?,
                 Section::Export => self.decode_export_section(&mut section)?,
-                Section::Start => self.start = Some(decoder.read_u32()?),
+                Section::Start => self.start = Some(section.read_u32()?),
+                Section::Element => self.decode_element_section(&mut section)?,
                 _ => todo!()
             }
 
@@ -192,6 +193,19 @@ impl Module {
 
         for _ in 0..num_exports {
             self.exports.push(Export::decode(decoder)?);
+        }
+
+        Ok(())
+    }
+
+    /// Decodes the element section in the module.
+    fn decode_element_section(&mut self, decoder: &mut Decoder) -> Result<(), DecodeError> {
+        let num_elements = decoder.read_u32()? as usize;
+
+        self.elem.reserve_exact(num_elements);
+
+        for _ in 0..num_elements {
+            self.elem.push(Elem::decode(decoder)?);
         }
 
         Ok(())
@@ -793,5 +807,133 @@ use super::*;
 
         assert!(Module::decode(&bytes)
             .is_err_and(|e| e == DecodeError::InvalidUTF8Name));
+    }
+
+    #[test]
+    fn decode_start_section() {
+        let bytes = [
+            0x00, 0x61, 0x73, 0x6d, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x08,                   // start section id
+            0x01,                   // section size
+
+            0x02,                   // start func index 2
+        ];
+
+        let module = Module::decode(&bytes).unwrap();
+
+        assert_eq!(module.start, Some(2));
+    }
+
+    #[test]
+    fn decode_element_section() {
+        let bytes = [
+            0x00, 0x61, 0x73, 0x6d, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x09,                   // element section id
+            0x08,                   // section size
+
+            0x01,                   // 1 element segment
+
+            0x00,                   // table index: 0
+            0x41, 0x05,             // i32.const 5
+            0x0B,                   // end
+            0x02,                   // 2 function indices
+            0x03,                   // func index 3
+            0x04,                   // func index 4
+        ];
+
+        let module = Module::decode(&bytes).unwrap();
+
+        assert_eq!(module.elem.len(), 1);
+        assert_eq!(module.elem[0].table_idx, 0);
+        assert!(matches!(module.elem[0].offset.instructions[0], Instr::I32Const(5)));
+        assert_eq!(module.elem[0].init.len(), 2);
+        assert_eq!(module.elem[0].init[0], 3);
+        assert_eq!(module.elem[0].init[1], 4);
+    }
+
+    #[test]
+    fn decode_element_section_invalid_table_index() {
+        let bytes = [
+            0x00, 0x61, 0x73, 0x6d, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x09,                   // element section id
+            0x06,                   // section size
+
+            0x01,                   // 1 element segment
+
+            0x01,                   // invalid table index: 1
+            0x41, 0x00,             // i32.const 0
+            0x0B,                   // end
+            0x00,                   // 0 function indices
+        ];
+
+        assert!(Module::decode(&bytes)
+            .is_err_and(|e| e == DecodeError::InvalidTableIndex));
+    }
+
+    #[test]
+    fn decode_element_section_non_const_expr() {
+        let bytes = [
+            0x00, 0x61, 0x73, 0x6d, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x09,                   // element section id
+            0x07,                   // section size
+
+            0x01,                   // 1 element segment
+
+            0x00,                   // table index: 0
+            0x41, 0x01,             // i32.const 1
+            0x1A,                   // drop (makes it non-const)
+            0x0B,                   // end
+            0x00,                   // 0 function indices
+        ];
+
+        assert!(Module::decode(&bytes)
+            .is_err_and(|e| e == DecodeError::InvalidNonConstExpr));
+    }
+
+    #[test]
+    fn decode_element_section_multiple() {
+        let bytes = [
+            0x00, 0x61, 0x73, 0x6d, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x09,                   // element section id
+            0x0C,                   // section size
+
+            0x02,                   // 2 element segments
+
+            // segment 1
+            0x00,                   // table index: 0
+            0x41, 0x00,             // i32.const 0
+            0x0B,                   // end
+            0x00,                   // 0 function indices
+
+            // segment 2
+            0x00,                   // table index: 0
+            0x41, 0x0A,             // i32.const 10
+            0x0B,                   // end
+            0x01,                   // 1 function index
+            0x0F,                   // func index 15
+        ];
+
+        let module = Module::decode(&bytes).unwrap();
+
+        assert_eq!(module.elem.len(), 2);
+
+        assert_eq!(module.elem[0].table_idx, 0);
+        assert!(matches!(module.elem[0].offset.instructions[0], Instr::I32Const(0)));
+        assert_eq!(module.elem[0].init.len(), 0);
+
+        assert_eq!(module.elem[1].table_idx, 0);
+        assert!(matches!(module.elem[1].offset.instructions[0], Instr::I32Const(10)));
+        assert_eq!(module.elem[1].init.len(), 1);
+        assert_eq!(module.elem[1].init[0], 15);
     }
 }
