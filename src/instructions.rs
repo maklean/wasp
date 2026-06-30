@@ -55,6 +55,12 @@ pub enum Instr {
     I64Store32(MemArg),
     MemorySize,
     MemoryGrow,
+
+    // Numeric Instructions
+    I32Const(i32),
+    I64Const(i64),
+    F32Const(f32),
+    F64Const(f64),
 }
 
 impl Instr {
@@ -134,6 +140,10 @@ impl Instr {
             }
 
             // Numeric Instructions
+            0x41 => Ok(Self::I32Const(decoder.read_i32()?)),
+            0x42 => Ok(Self::I64Const(decoder.read_i64()?)),
+            0x43 => Ok(Self::F32Const(decoder.read_f32()?)),
+            0x44 => Ok(Self::F64Const(decoder.read_f64()?)),
 
             _ => Err(DecodeError::InvalidInstr)
         }

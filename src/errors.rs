@@ -4,6 +4,7 @@ pub enum DecodeError {
     InvalidSpecificationVersion,
     UnexpectedEof,
     MalformedInteger,
+    MalformedFloatingPoint,
     InvalidSectionId,
     InvalidFunctionType,
     InvalidValType,

@@ -68,9 +68,37 @@ impl<'a> Decoder<'a> {
         }
     }
 
+    /// Reads a 32-bit floating point number.
+    pub fn read_f32(&mut self) -> Result<f32, DecodeError> {
+        let bytes: [u8; 4] = self.read_bytes(4)?
+            .try_into()
+            .map_err(|_| DecodeError::MalformedFloatingPoint)?;
+
+        Ok(f32::from_le_bytes(bytes))
+    }
+
+    /// Reads a 64-bit floating point number.
+    pub fn read_f64(&mut self) -> Result<f64, DecodeError> {
+        let bytes: [u8; 8] = self.read_bytes(8)?
+            .try_into()
+            .map_err(|_| DecodeError::MalformedFloatingPoint)?;
+        
+        Ok(f64::from_le_bytes(bytes))
+    }
+
     /// Reads a LEB128 encoded unsigned 32-bit integer.
     pub fn read_u32(&mut self) -> Result<u32, DecodeError> {
         Ok(self.read_uint(32)? as u32)
+    }
+
+    /// Reads a LEB128 encoded signed 32-bit integer.
+    pub fn read_i32(&mut self) -> Result<i32, DecodeError> {
+        Ok(self.read_sint(32)? as i32)
+    }
+
+    /// Reads a LEB128 encoded signed 64-bit integer.
+    pub fn read_i64(&mut self) -> Result<i64, DecodeError> {
+        Ok(self.read_sint(64)? as i64)
     }
 
     /// Reads a LEB128 encoded unsigned n-bit integer.
@@ -99,6 +127,53 @@ impl<'a> Decoder<'a> {
             bits_read += 7;
 
             // read too many bits
+            if bits_read >= bits {
+                return Err(DecodeError::MalformedInteger);
+            }
+        }
+
+        Ok(n)
+    }
+
+    /// Reads a LEB128 encoded signed n-bit integer.
+    fn read_sint(&mut self, bits: usize) -> Result<i64, DecodeError> {
+        let mut n = 0i64;
+        let mut bits_read: usize = 0;
+
+        loop {
+            let b = self.read_byte()?;
+            let v = ((b & 0x7f) as i64) << bits_read;
+
+            // If the high bit in the byte is 0, we're done reading.
+            if b & 0x80 == 0 {
+                let remaining_bits = bits - bits_read;
+
+                // Check if it's a positive or negative number
+                if b & 0x40 == 0 {
+                    // positive: if the byte is trying to add more than what we can add, the number is malformed (-1 to disinclude the sign bit)
+                    if b >= 1u8.checked_shl(remaining_bits as u32 - 1).unwrap_or(u8::MAX) {
+                        return Err(DecodeError::MalformedInteger);
+                    }
+                } else {
+                    // negative: check if it's not "more negative" than the remaining_bits allow
+                    if remaining_bits <= 8 && b < (0x80 - (1u8 << (remaining_bits as u32 - 1))) {
+                        return Err(DecodeError::MalformedInteger);
+                    }
+                }
+
+                n += v;
+
+                // sign extend if it's negative
+                if b & 0x40 != 0 {
+                    n += !0i64 << (bits_read + 7);
+                }
+
+                break;
+            }
+
+            n += v;
+            bits_read += 7;
+
             if bits_read >= bits {
                 return Err(DecodeError::MalformedInteger);
             }
