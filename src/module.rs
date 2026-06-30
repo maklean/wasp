@@ -85,6 +85,7 @@ impl Module {
                 Section::Table => self.decode_table_section(&mut section)?,
                 Section::Memory => self.decode_memory_section(&mut section)?,
                 Section::Global => self.decode_global_section(&mut section)?,
+                Section::Export => self.decode_export_section(&mut section)?,
                 _ => todo!()
             }
 
@@ -177,6 +178,19 @@ impl Module {
 
         for _ in 0..num_globals {
             self.globals.push(Global::decode(decoder)?);
+        }
+
+        Ok(())
+    }
+
+    /// Decodes the export section in the module.
+    fn decode_export_section(&mut self, decoder: &mut Decoder) -> Result<(), DecodeError> {
+        let num_exports = decoder.read_u32()? as usize;
+
+        self.exports.reserve_exact(num_exports);
+
+        for _ in 0..num_exports {
+            self.exports.push(Export::decode(decoder)?);
         }
 
         Ok(())
@@ -306,7 +320,7 @@ use super::*;
         assert_eq!(module.imports.len(), 1);
         assert_eq!(module.imports[0].module, "env");
         assert_eq!(module.imports[0].name, "add");
-        assert!(matches!(module.imports[0].desc, Desc::Func(0)));
+        assert!(matches!(module.imports[0].desc, ImportDesc::Func(0)));
     }
 
     #[test]
@@ -334,7 +348,7 @@ use super::*;
         assert_eq!(module.imports[0].name, "g");
 
         match &module.imports[0].desc {
-            Desc::Global(g) => {
+            ImportDesc::Global(g) => {
                 assert!(matches!(g.val_type, ValType::I32));
                 assert!(matches!(g.mutability, Mutability::Const));
             }
@@ -360,7 +374,7 @@ use super::*;
         ];
 
         assert!(Module::decode(&bytes)
-            .is_err_and(|e| e == DecodeError::InvalidDesc));
+            .is_err_and(|e| e == DecodeError::InvalidImportDesc));
     }
 
     #[test]
@@ -671,5 +685,112 @@ use super::*;
             Module::decode(bytes),
             Err(DecodeError::InvalidNonConstExpr)
         ));
+    }
+
+    #[test]
+    fn decode_export_section_func() {
+        let bytes = [
+            0x00, 0x61, 0x73, 0x6d, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x07,                   // export section id
+            0x07,                   // section size
+
+            0x01,                   // 1 export
+
+            // export "add" (func index 0)
+            0x03, 0x61, 0x64, 0x64, // export name len=3, "add"
+            0x00,                   // desc: func
+            0x00,                   // func index: 0
+        ];
+
+        let module = Module::decode(&bytes).unwrap();
+        assert_eq!(module.exports.len(), 1);
+        assert_eq!(module.exports[0].name, "add");
+        assert!(matches!(module.exports[0].desc, ExportDesc::Func(0)));
+    }
+
+    #[test]
+    fn test_decode_multiple_exports() {
+        let bytes: &[u8] = &[
+            0x00, 0x61, 0x73, 0x6D, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x07,                   // export section id
+            0x11,                   // section size
+
+            0x04,                   // 4 exports
+
+            0x01, 0x61,             // export name len=1, "a"
+            0x00,                   // desc: func
+            0x00,                   // func index: 0
+
+            0x01, 0x62,             // export name len=1, "b"
+            0x01,                   // desc: table
+            0x01,                   // table index: 1
+
+            0x01, 0x63,             // export name len=1, "c"
+            0x02,                   // desc: mem
+            0x02,                   // mem index: 2
+
+            0x01, 0x64,             // export name len=1, "d"
+            0x03,                   // desc: global
+            0x03,                   // global index: 3
+        ];
+
+        let module = Module::decode(bytes).unwrap();
+
+        assert_eq!(module.exports.len(), 4);
+
+        assert_eq!(module.exports[0].name, "a");
+        assert!(matches!(module.exports[0].desc, ExportDesc::Func(0)));
+
+        assert_eq!(module.exports[1].name, "b");
+        assert!(matches!(module.exports[1].desc, ExportDesc::Table(1)));
+
+        assert_eq!(module.exports[2].name, "c");
+        assert!(matches!(module.exports[2].desc, ExportDesc::Mem(2)));
+
+        assert_eq!(module.exports[3].name, "d");
+        assert!(matches!(module.exports[3].desc, ExportDesc::Global(3)));
+    }
+
+    #[test]
+    fn decode_export_section_invalid_desc() {
+        let bytes = [
+            0x00, 0x61, 0x73, 0x6d, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x07,                   // export section id
+            0x04,                   // section size
+
+            0x01,                   // 1 export
+
+            // export "x" (invalid desc)
+            0x01, 0x78,             // export name len=1, "x"
+            0x04,                   // desc: invalid
+        ];
+
+        assert!(Module::decode(&bytes)
+            .is_err_and(|e| e == DecodeError::InvalidExportDesc));
+    }
+
+    #[test]
+    fn decode_export_section_invalid_utf8() {
+        let bytes = [
+            0x00, 0x61, 0x73, 0x6d, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+
+            0x07,                   // export section id
+            0x04,                   // section size
+
+            0x01,                   // 1 export
+
+            // invalid UTF-8 export name
+            0x02, 0xFF, 0xFE,       // export name len=2, invalid UTF-8
+        ];
+
+        assert!(Module::decode(&bytes)
+            .is_err_and(|e| e == DecodeError::InvalidUTF8Name));
     }
 }

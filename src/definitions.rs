@@ -170,7 +170,7 @@ pub struct Import {
     pub name: String,
 
     /// Type/Descriptor of import.
-    pub desc: Desc,
+    pub desc: ImportDesc,
 }
 
 impl Import {
@@ -189,7 +189,7 @@ impl Import {
             .to_string();
 
         // get desc
-        let desc = Desc::decode(decoder)?;
+        let desc = ImportDesc::decode(decoder)?;
 
         Ok(Self { module, name, desc })
     }
@@ -201,7 +201,23 @@ pub struct Export {
     pub name: String,
 
     /// Type/Descriptor of export.
-    pub desc: Desc,
+    pub desc: ExportDesc,
+}
+
+impl Export {
+    /// Decodes an `Export` from a sequence of bytes.
+    pub fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
+        // get name
+        let name_len = decoder.read_u32()? as usize;
+        let name = std::str::from_utf8(decoder.read_bytes(name_len)?)
+            .map_err(|_| DecodeError::InvalidUTF8Name)?
+            .to_string();
+
+        // get desc
+        let desc = ExportDesc::decode(decoder)?;
+
+        Ok(Self { name, desc })
+    }
 }
 
 /// Description/schema of a table.
@@ -300,30 +316,58 @@ impl TryFrom<u8> for Mutability {
     }
 }
 
-/// Types of imports/exports.
-pub enum Desc {
+/// Types of imports.
+pub enum ImportDesc {
     /// Function index.
     Func(u32),
 
-    /// Table index.
+    /// Table type.
     Table(TableType),
 
-    /// Memory index.
+    /// Memory type.
     Mem(Limits),
 
-    /// Global Index.
+    /// Global type.
     Global(GlobalType),
 }
 
-impl Desc {
-    /// Decodes a `Desc` from a sequence of bytes.
+impl ImportDesc {
+    /// Decodes an `ImportDesc` from a sequence of bytes.
     fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
         match decoder.read_byte()? {
             0x00 => Ok(Self::Func(decoder.read_u32()?)),
             0x01 => Ok(Self::Table(TableType::decode(decoder)?)),
             0x02 => Ok(Self::Mem(Limits::decode(decoder)?)),
             0x03 => Ok(Self::Global(GlobalType::decode(decoder)?)),
-            _ => Err(DecodeError::InvalidDesc),
+            _ => Err(DecodeError::InvalidImportDesc),
+        }
+    }
+}
+
+/// Types of exports
+pub enum ExportDesc {
+    /// Function index.
+    Func(u32),
+
+    /// Table index.
+    Table(u32),
+
+    /// Memory index.
+    Mem(u32),
+
+    /// Global index.
+    Global(u32)
+}
+
+impl ExportDesc {
+    /// Decodes an `ExportDesc` from a sequence of bytes.
+    fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
+        match decoder.read_byte()? {
+            0x00 => Ok(Self::Func(decoder.read_u32()?)),
+            0x01 => Ok(Self::Table(decoder.read_u32()?)),
+            0x02 => Ok(Self::Mem(decoder.read_u32()?)),
+            0x03 => Ok(Self::Global(decoder.read_u32()?)),
+            _ => Err(DecodeError::InvalidExportDesc),
         }
     }
 }
