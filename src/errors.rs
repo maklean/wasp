@@ -8,7 +8,6 @@ pub enum DecodeError {
     InvalidSectionId,
     InvalidFunctionType,
     InvalidValType,
-    InvalidFunctionTypeResultCount,
     InvalidSectionOrder,
     InvalidUTF8Name,
     InvalidImportDesc,
@@ -29,4 +28,12 @@ pub enum DecodeError {
     InvalidMemoryIndex,
     InvalidFunctionCount,
     MalformedCodeSize,
+}
+
+#[derive(PartialEq, Eq, Debug)]
+pub enum ValidateError {
+    LimitsMinLargerThanK(u64),
+    LimitsMaxLargerThanK,
+    LimitsMinLargerThanMax,
+    FuncTypeHasMoreThanOneResult,
 }

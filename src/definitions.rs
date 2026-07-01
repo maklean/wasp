@@ -1,4 +1,4 @@
-use crate::{decoder::Decoder, errors::DecodeError, instructions::Expr};
+use crate::{decoder::Decoder, errors::{DecodeError, ValidateError}, instructions::Expr};
 
 /// Types that Wasm code can use for its values.
 #[derive(Clone)]
@@ -47,18 +47,23 @@ impl FuncType {
             .map(|&b| ValType::try_from(b))
             .collect::<Result<Vec<_>, _>>()?;
 
-        // Get function result (there should only be at most one)
         let results_count = decoder.read_u32()? as usize;
-        if results_count > 1 {
-            return Err(DecodeError::InvalidFunctionTypeResultCount);
-        }
-
         let results: Vec<ValType> = decoder.read_bytes(results_count)?
             .iter()
             .map(|&b| ValType::try_from(b))
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(Self { params, results })
+    }
+
+    /// Validates a `FuncType`.
+    pub fn validate(&self) -> Result<(), ValidateError> {
+        // FuncTypes can only have at most one result in Wasm 1.0
+        if self.results.len() > 1 {
+            return Err(ValidateError::FuncTypeHasMoreThanOneResult);
+        }
+
+        Ok(())
     }
 }
 
@@ -127,11 +132,18 @@ pub struct Mem {
 }
 
 impl Mem {
+    const MEMORY_MAX: u64 = 65536;
+
     /// Decodes a linear memory from a sequence of bytes.
     pub fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
         let mem_type = Limits::decode(decoder)?;
 
         Ok(Self { mem_type })
+    }
+
+    /// Validates a linear memory.
+    pub fn validate(&self) -> Result<(), ValidateError> {
+        self.mem_type.validate(Self::MEMORY_MAX)
     }
 }
 
@@ -307,12 +319,20 @@ pub struct TableType {
 }
 
 impl TableType {
+    /// The range which the limit must be valid within.
+    const TABLE_MAX: u64 = 4294967296;
+
     /// Decodes a `TableType` from a sequence of bytes.
     fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
         let elem_type = ElemType::try_from(decoder.read_byte()?)?;
         let limits = Limits::decode(decoder)?;
 
         Ok(Self { limits, elem_type })
+    }
+
+    /// Validates a `TableType`.
+    fn validate(&self) -> Result<(), ValidateError> {
+        self.limits.validate(Self::TABLE_MAX)
     }
 }
 
@@ -334,6 +354,28 @@ impl Limits {
             Self::FLAG_MAX_PRESENT => Ok(Self { min: decoder.read_u32()?, max: Some(decoder.read_u32()?) }),
             _ => Err(DecodeError::InvalidLimitsFlag)
         }
+    }
+
+    /// Validaes a `Limits` instance.
+    fn validate(&self, k: u64) -> Result<(), ValidateError> {
+        // min shouldn't be larger than k
+        if self.min as u64 > k {
+            return Err(ValidateError::LimitsMinLargerThanK(k));   
+        }
+
+        if let Some(max) = self.max {
+            // maximum must not be larger than k
+            if max as u64 > k {
+                return Err(ValidateError::LimitsMaxLargerThanK);
+            }
+
+            // max must not be smaller than min
+            if max < self.min {
+                return Err(ValidateError::LimitsMinLargerThanMax);
+            }
+        }
+
+        Ok(())
     }
 }
 
