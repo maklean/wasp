@@ -123,6 +123,11 @@ impl Table {
 
         Ok(Self { table_type })
     }
+
+    /// Validates a `Table`.
+    pub fn validate(&self) -> Result<(), ValidateError> {
+        self.table_type.validate()
+    }
 }
 
 /// Wasm module's linear memory outline.
@@ -411,6 +416,11 @@ impl GlobalType {
         let mutability = Mutability::try_from(decoder.read_byte()?)?;
 
         Ok(Self { val_type, mutability })
+    }
+
+    /// Validates a `GlobalType`.
+    fn validate(&self) -> Result<(), ValidateError> {
+        Ok(())
     }
 }
 
