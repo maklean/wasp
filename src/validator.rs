@@ -1,8 +1,12 @@
-use crate::{definitions::{FuncType, GlobalType, ImportDesc, Limits, TableType}, errors::ValidateError, module::Module};
+use crate::{definitions::{FuncType, GlobalType, ImportDesc, Limits, TableType, ValType}, errors::ValidateError, module::Module};
 
-pub struct Validator;
+pub struct Validator<'a> {
+    ctx: Context<'a>,
+    vals: Vec<ValType>,
+    ctrl: Vec<CtrlFrame>,
+}
 
-impl Validator {
+impl<'a> Validator<'a> {
     pub fn validate(module: &Module) -> Result<(), ValidateError> {
         let ctx = Context::new(module);
 
@@ -79,4 +83,11 @@ impl<'a> Context<'a> {
             globals
         }
     }
+}
+
+struct CtrlFrame {
+    label_types: Vec<ValType>,
+    end_types: Vec<ValType>,
+    height: usize,
+    unreachable: bool,
 }
