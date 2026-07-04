@@ -8,7 +8,7 @@ in web infrastructure and interpreters.
 To make the base interpreter, I'm just implementing each semantic phase in order:
 
 - [X] Decoder (parses all Wasm sections, instructions, expressions into an in-memory module representation)
-    - **NOTE:** I've added per-section unit tests in the decoder (which you can run with `cargo test`), eventually I plan on getting rid of those and test the entire interpreter using the Wasm spec test suite instead.
+    - **NOTE:** I've added per-section unit tests for the decoding (which you can run with `cargo test`), eventually I plan on getting rid of those and test the entire interpreter using the Wasm spec test suite instead.
 - [ ] Validator (type checking functions & instructions)
 - [ ] Execution (executing the module through a module instance)
 
