@@ -1,5 +1,3 @@
-use std::f32::consts::E;
-
 use crate::{decoder::Decoder, definitions::ValType, errors::{DecodeError, ValidateError}, validator::Validator};
 
 /// Declares the end of an instruction sequence.
