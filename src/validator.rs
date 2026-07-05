@@ -18,6 +18,7 @@ impl<'a> Validator<'a> {
         self.pop_opd_expect(t)?;
         self.pop_opd_expect(t)?;
         self.push_opd(t);
+        
         Ok(())
     }
 
@@ -25,6 +26,7 @@ impl<'a> Validator<'a> {
     pub fn unop(&mut self, t: ValType) -> Result<(), ValidateError> {
         self.pop_opd_expect(t)?;
         self.push_opd(t);
+
         Ok(())
     }
 
@@ -32,6 +34,7 @@ impl<'a> Validator<'a> {
     pub fn testop(&mut self, t: ValType) -> Result<(), ValidateError> {
         self.pop_opd_expect(t)?;
         self.push_opd(ValType::I32);
+
         Ok(())
     }
 
@@ -40,6 +43,7 @@ impl<'a> Validator<'a> {
         self.pop_opd_expect(t)?;
         self.pop_opd_expect(t)?;
         self.push_opd(ValType::I32);
+
         Ok(())
     }
 
@@ -47,6 +51,8 @@ impl<'a> Validator<'a> {
     pub fn cvtop(&mut self, from: ValType, to: ValType) -> Result<(), ValidateError> {
         self.pop_opd_expect(from)?;
         self.push_opd(to);
+
+        Ok(())
     }
 
     pub fn push_opd(&mut self, val_type: ValType) {
