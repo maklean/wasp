@@ -41,5 +41,6 @@ pub enum ValidateError {
     ExpectedAtLeastOneControlFrame,
     PoppingOutsideOfControlFrame,
     ExpectedOperandInOpdStack { expect: ValType, actual: ValType },
-    StackHeightMismatchAtEnd { expect: usize, actual: usize }
+    StackHeightMismatchAtEnd { expect: usize, actual: usize },
+    InvalidInstr,
 }

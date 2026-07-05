@@ -1,4 +1,6 @@
-use crate::{decoder::Decoder, definitions::ValType, errors::DecodeError};
+use std::f32::consts::E;
+
+use crate::{decoder::Decoder, definitions::ValType, errors::{DecodeError, ValidateError}, validator::Validator};
 
 /// Declares the end of an instruction sequence.
 const END_MARKER: u8 = 0x0B;
@@ -412,6 +414,75 @@ impl Instr {
             0xBF => Ok(Self::F64ReinterpretI64),
 
             _ => Err(DecodeError::InvalidInstr)
+        }
+    }
+
+    pub fn validate(&self, validator: &mut Validator) -> Result<(), ValidateError> {
+        match self {
+            // Numeric Instructions
+                // t.const
+                Self::I32Const(_) | Self::I64Const(_) | Self::F32Const(_) | Self::F64Const(_) 
+                    => validator.push_opd(self.val_type()),
+
+                // t.unop
+                Self::I32Clz | Self::I64Clz | Self::I32Ctz | Self::I64Ctz | Self::I32Popcnt | Self::I64Popcnt
+                    | Self::F32Abs | Self::F64Abs | Self::F32Neg | Self::F64Neg | Self::F32Sqrt | Self::F64Sqrt
+                    | Self::F32Ceil | Self::F64Ceil | Self::F32Floor | Self::F64Floor
+                    | Self::F32Trunc | Self::F64Trunc | Self::F32Nearest | Self::F64Nearest
+                    => validator.unop(self.val_type())?,
+                
+                // t.binop
+                Self::I32Add | Self::I64Add
+                    | Self::I32Sub | Self::I64Sub | Self::I32Mul | Self::I64Mul | Self::I32DivS | Self::I64DivS
+                    | Self::I32DivU | Self::I64DivU | Self::I32RemS | Self::I64RemS | Self::I32RemU | Self::I64RemU
+                    | Self::I32And | Self::I64And | Self::I32Or | Self::I64Or | Self::I32Xor | Self::I64Xor
+                    | Self::I32Shl | Self::I64Shl | Self::I32ShrS | Self::I64ShrS | Self::I32ShrU | Self::I64ShrU
+                    | Self::I32Rotl | Self::I64Rotl | Self::I32Rotr | Self::I64Rotr | Self::F32Add | Self::F64Add
+                    | Self::F32Sub | Self::F64Sub | Self::F32Mul | Self::F64Mul | Self::F32Div | Self::F64Div
+                    | Self::F32Min | Self::F64Min | Self::F32Max | Self::F64Max | Self::F32Copysign | Self::F64Copysign
+                    => validator.binop(self.val_type())?,
+
+                // t.testop
+                Self::I32Eqz | Self::I64Eqz => validator.testop(self.val_type())?,
+
+                // t.relop
+                Self::I32Eq | Self::I64Eq
+                    | Self::I32Ne | Self::I64Ne | Self::I32LtS | Self::I64LtS | Self::I32LtU | Self::I64LtU
+                    | Self::I32GtS | Self::I64GtS | Self::I32GtU | Self::I64GtU | Self::I32LeS | Self::I64LeS
+                    | Self::I32LeU | Self::I64LeU | Self::I32GeS | Self::I64GeS | Self::I32GeU | Self::I64GeU
+                    | Self::F32Eq | Self::F64Eq | Self::F32Ne | Self::F64Ne | Self::F32Lt | Self::F64Lt
+                    | Self::F32Gt | Self::F64Gt | Self::F32Le | Self::F64Le | Self::F32Ge | Self::F64Ge
+                    => validator.relop(self.val_type())?,
+
+            _ => Err(ValidateError::InvalidInstr)?
+        }
+        Ok(())
+    }
+
+    /// Returns the corresponding ValType for the current instruction.
+    fn val_type(&self) -> ValType {
+        use Instr::*;
+
+        match self {
+            I32Eqz | I32Eq | I32Ne | I32LtS | I32LtU | I32GtS | I32GtU | I32LeS | I32LeU
+                | I32GeS | I32GeU | I32Clz | I32Ctz | I32Popcnt | I32Add | I32Sub | I32Mul
+                | I32DivS | I32DivU | I32RemS | I32RemU | I32And | I32Or | I32Xor | I32Shl
+                | I32ShrS | I32ShrU | I32Rotl | I32Rotr | I32Const(_) => ValType::I32,
+
+            I64Eqz | I64Eq | I64Ne | I64LtS | I64LtU | I64GtS | I64GtU | I64LeS | I64LeU
+                | I64GeS | I64GeU | I64Clz | I64Ctz | I64Popcnt | I64Add | I64Sub | I64Mul
+                | I64DivS | I64DivU | I64RemS | I64RemU | I64And | I64Or | I64Xor | I64Shl
+                | I64ShrS | I64ShrU | I64Rotl | I64Rotr | I64Const(_) => ValType::I64,
+
+            F32Eq | F32Ne | F32Lt | F32Gt | F32Le | F32Ge | F32Abs | F32Neg | F32Ceil
+                | F32Floor | F32Trunc | F32Nearest | F32Sqrt | F32Add | F32Sub | F32Mul
+                | F32Div | F32Min | F32Max | F32Copysign | F32Const(_) => ValType::F32,
+
+            F64Eq | F64Ne | F64Lt | F64Gt | F64Le | F64Ge | F64Abs | F64Neg | F64Ceil
+                | F64Floor | F64Trunc | F64Nearest | F64Sqrt | F64Add | F64Sub | F64Mul
+                | F64Div | F64Min | F64Max | F64Copysign | F64Const(_) => ValType::F64,
+
+            _ => unreachable!("val_type() called on non-numeric-typed instruction"),
         }
     }
 

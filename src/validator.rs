@@ -7,25 +7,39 @@ pub struct Validator<'a> {
 }
 
 impl<'a> Validator<'a> {
-    pub fn validate(module: &Module) -> Result<(), ValidateError> {
-        let ctx = Context::new(module);
-
-        /*
-            NOTE: I'm gonna make it so each type has a validate() method
-            that follows the validation rules from the spec.
-
-            If there's any errors, a ValidateError will be propagated back
-            up to this function and returned.
-
-            This tree-walking approach should make it easy to validate
-            everything since each type calls validate() on other types
-            (its members) and those calls can turn into other validate()
-            calls, allowing me to validate everything easily.
-
-            That being said, I have no idea how I'm gonna do this yet, but it's
-            good I came up with this idea :)
-        */
+    pub fn validate(module: &'a Module) -> Result<(), ValidateError> {
+        let mut this = Self { ctx: Context::new(module), opds: Vec::new(), ctrls: Vec::new() };
         
+        Ok(())
+    }
+
+    /// Validates a binary operator.
+    pub fn binop(&mut self, t: ValType) -> Result<(), ValidateError> {
+        self.pop_opd_expect(t)?;
+        self.pop_opd_expect(t)?;
+        self.push_opd(t);
+        Ok(())
+    }
+
+    /// Validates a unary operator.
+    pub fn unop(&mut self, t: ValType) -> Result<(), ValidateError> {
+        self.pop_opd_expect(t)?;
+        self.push_opd(t);
+        Ok(())
+    }
+
+    /// Validates a test operator.
+    pub fn testop(&mut self, t: ValType) -> Result<(), ValidateError> {
+        self.pop_opd_expect(t)?;
+        self.push_opd(ValType::I32);
+        Ok(())
+    }
+
+    /// Validates a relational operator.
+    pub fn relop(&mut self, t: ValType) -> Result<(), ValidateError> {
+        self.pop_opd_expect(t)?;
+        self.pop_opd_expect(t)?;
+        self.push_opd(ValType::I32);
         Ok(())
     }
 
