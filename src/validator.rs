@@ -43,6 +43,12 @@ impl<'a> Validator<'a> {
         Ok(())
     }
 
+    /// Validates a conversion operator.
+    pub fn cvtop(&mut self, from: ValType, to: ValType) -> Result<(), ValidateError> {
+        self.pop_opd_expect(from)?;
+        self.push_opd(to);
+    }
+
     pub fn push_opd(&mut self, val_type: ValType) {
         self.opds.push(val_type);
     }

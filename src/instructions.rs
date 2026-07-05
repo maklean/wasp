@@ -453,6 +453,28 @@ impl Instr {
                     | Self::F32Eq | Self::F64Eq | Self::F32Ne | Self::F64Ne | Self::F32Lt | Self::F64Lt
                     | Self::F32Gt | Self::F64Gt | Self::F32Le | Self::F64Le | Self::F32Ge | Self::F64Ge
                     => validator.relop(self.val_type())?,
+                
+                // t.cvtop
+                Self::I32WrapI64 => validator.cvtop(ValType::I64, ValType::I32)?,
+                Self::I64ExtendI32S | Self::I64ExtendI32U => validator.cvtop(ValType::I32, ValType::I64)?,
+
+                Self::I32TruncF32S | Self::I32TruncF32U => validator.cvtop(ValType::F32, ValType::I32)?,
+                Self::I32TruncF64S | Self::I32TruncF64U => validator.cvtop(ValType::F64, ValType::I32)?,
+                Self::I64TruncF32S | Self::I64TruncF32U => validator.cvtop(ValType::F32, ValType::I64)?,
+                Self::I64TruncF64S | Self::I64TruncF64U => validator.cvtop(ValType::F64, ValType::I64)?,
+
+                Self::F32DemoteF64 => validator.cvtop(ValType::F64, ValType::F32)?,
+                Self::F64PromoteF32 => validator.cvtop(ValType::F32, ValType::F64)?,
+                
+                Self::F32ConvertI32S | Self::F32ConvertI32U => validator.cvtop(ValType::I32, ValType::F32)?,
+                Self::F32ConvertI64S | Self::F32ConvertI64U => validator.cvtop(ValType::I64, ValType::F32)?,
+                Self::F64ConvertI32S | Self::F64ConvertI32U => validator.cvtop(ValType::I32, ValType::F64)?,
+                Self::F64ConvertI64S | Self::F64ConvertI64U => validator.cvtop(ValType::I64, ValType::F64)?,
+
+                Self::F32ReinterpretI32 => validator.cvtop(ValType::I32, ValType::F32)?,
+                Self::F64ReinterpretI64 => validator.cvtop(ValType::I64, ValType::F64)?,
+                Self::I32ReinterpretF32 => validator.cvtop(ValType::F32, ValType::I32)?,
+                Self::I64ReinterpretF64 => validator.cvtop(ValType::F64, ValType::I64)?,
 
             _ => Err(ValidateError::InvalidInstr)?
         }
