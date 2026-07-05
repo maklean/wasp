@@ -18,7 +18,7 @@ impl<'a> Validator<'a> {
         self.pop_opd_expect(t)?;
         self.pop_opd_expect(t)?;
         self.push_opd(t);
-        
+
         Ok(())
     }
 
@@ -81,7 +81,7 @@ impl<'a> Validator<'a> {
         // Unknown matches any type
         if actual == ValType::Unknown {
             return Ok(expect);
-        } else if actual == ValType::Unknown {
+        } else if expect == ValType::Unknown {
             return Ok(actual);
         }
 

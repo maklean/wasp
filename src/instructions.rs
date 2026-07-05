@@ -475,6 +475,17 @@ impl Instr {
                 Self::F64ReinterpretI64 => validator.cvtop(ValType::I64, ValType::F64)?,
                 Self::I32ReinterpretF32 => validator.cvtop(ValType::F32, ValType::I32)?,
                 Self::I64ReinterpretF64 => validator.cvtop(ValType::F64, ValType::I64)?,
+            
+            // Parametric Instructions
+                Self::Drop => { validator.pop_opd()?; },
+                Self::Select => {
+                    validator.pop_opd_expect(ValType::I32)?;
+
+                    let t = validator.pop_opd()?;
+                    let t = validator.pop_opd_expect(t)?; // could be ValType::Unknown after this pop
+
+                    validator.push_opd(t);
+                }
 
             _ => Err(ValidateError::InvalidInstr)?
         }
