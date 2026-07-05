@@ -1,3 +1,5 @@
+use crate::definitions::ValType;
+
 #[derive(PartialEq, Eq, Debug)]
 pub enum DecodeError {
     InvalidMagicHeader,
@@ -36,4 +38,8 @@ pub enum ValidateError {
     LimitsMaxLargerThanK,
     LimitsMinLargerThanMax,
     FuncTypeHasMoreThanOneResult,
+    ExpectedAtLeastOneControlFrame,
+    PoppingOutsideOfControlFrame,
+    ExpectedOperandInOpdStack { expect: ValType, actual: ValType },
+    StackHeightMismatchAtEnd { expect: usize, actual: usize }
 }

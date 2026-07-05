@@ -1,12 +1,13 @@
 use crate::{decoder::Decoder, errors::{DecodeError, ValidateError}, instructions::Expr};
 
 /// Types that Wasm code can use for its values.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum ValType {
     I32,
     I64,
     F32,
-    F64
+    F64,
+    Unknown
 }
 
 impl TryFrom<u8> for ValType {

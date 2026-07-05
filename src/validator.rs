@@ -2,8 +2,8 @@ use crate::{definitions::{FuncType, GlobalType, ImportDesc, Limits, TableType, V
 
 pub struct Validator<'a> {
     ctx: Context<'a>,
-    vals: Vec<ValType>,
-    ctrl: Vec<CtrlFrame>,
+    opds: Vec<ValType>,
+    ctrls: Vec<CtrlFrame>,
 }
 
 impl<'a> Validator<'a> {
@@ -28,6 +28,92 @@ impl<'a> Validator<'a> {
         
         Ok(())
     }
+
+    pub fn push_opd(&mut self, val_type: ValType) {
+        self.opds.push(val_type);
+    }
+
+    pub fn pop_opd(&mut self) -> Result<ValType, ValidateError> {
+        let Some(frame) = self.ctrls.last() else {
+            return Err(ValidateError::ExpectedAtLeastOneControlFrame);
+        };
+
+        if self.opds.len() == frame.height && frame.unreachable {
+            // we're trying to pop past the end of the frame while being in dead code, return Unknown
+            return Ok(ValType::Unknown);
+        } else if self.opds.len() == frame.height  {
+            // we're trying to pop past the end without being in dead code
+            return Err(ValidateError::PoppingOutsideOfControlFrame);
+        }
+
+        Ok(self.opds.pop().unwrap())
+    }
+
+    pub fn pop_opd_expect(&mut self, expect: ValType) -> Result<ValType, ValidateError> {
+        let actual = self.pop_opd()?;
+
+        // Unknown matches any type
+        if actual == ValType::Unknown {
+            return Ok(expect);
+        } else if actual == ValType::Unknown {
+            return Ok(actual);
+        }
+
+        // check for match
+        if actual != expect {
+            return Err(ValidateError::ExpectedOperandInOpdStack { expect, actual });
+        }
+
+        Ok(actual)
+    }
+
+    pub fn push_opds(&mut self, mut val_types: Vec<ValType>) {
+        self.opds.append(&mut val_types);
+    }
+
+    pub fn pop_opds(&mut self, val_types: Vec<ValType>) -> Result<(), ValidateError> {
+        for expect in val_types.iter().rev() {
+            self.pop_opd_expect(expect.clone())?;
+        }
+
+        Ok(())
+    }
+
+    pub fn push_ctrl(&mut self, label_types: Vec<ValType>, end_types: Vec<ValType>) {
+        let frame = CtrlFrame { label_types, end_types, height: self.opds.len(), unreachable: false };
+        self.ctrls.push(frame);
+    }
+
+    pub fn pop_ctrl(&mut self) -> Result<Vec<ValType>, ValidateError> {
+        if self.ctrls.last().is_none() {
+            return Err(ValidateError::ExpectedAtLeastOneControlFrame);
+        };
+
+        let frame = self.ctrls.last().cloned().unwrap(); // yikes (TODO: maybe interior mutability prevents cloning)
+
+        // since we're exiting a control frame, its end types should be sitting on the stack
+        self.pop_opds(frame.end_types.clone())?;
+
+        // should be back to the frame's height after popping all operands
+        if self.opds.len() != frame.height {
+            return Err(ValidateError::StackHeightMismatchAtEnd { expect: self.opds.len(), actual: frame.height });
+        }
+
+        Ok(frame.end_types)
+    }
+
+    pub fn unreachable(&mut self) -> Result<(), ValidateError> {
+        let Some(frame) = self.ctrls.last_mut() else {
+            return Err(ValidateError::ExpectedAtLeastOneControlFrame);
+        };
+
+        // return back to the frame's height
+        self.opds.truncate(frame.height);
+        frame.unreachable = true;
+
+        Ok(())
+    }
+
 }
 
 struct Context<'a> {
@@ -85,6 +171,7 @@ impl<'a> Context<'a> {
     }
 }
 
+#[derive(Clone)]
 struct CtrlFrame {
     label_types: Vec<ValType>,
     end_types: Vec<ValType>,
