@@ -143,11 +143,29 @@ impl<'a> Validator<'a> {
 }
 
 struct Context<'a> {
+    /// The types of the functions declared in the current module.
     types: &'a Vec<FuncType>,
+
+    /// List of functions declared in the current module.
     funcs: Vec<&'a FuncType>,
+
+    /// List of tables declared in the current module.
     tables: Vec<&'a TableType>,
+
+    /// List of linear memories declared in the current module.
     mems: Vec<&'a Limits>,
+
+    /// List of globals declared in the current module.
     globals: Vec<&'a GlobalType>,
+
+    /// List of locals in the current function (incl. params)
+    locals: Vec<ValType>,
+
+    /// Stack of labels (represented by their - optional - result type) accessible from the current position.
+    labels: Vec<ResultType>,
+
+    /// Return type of the current function being validated.
+    return_type: Option<ResultType>,
 }
 
 impl<'a> Context<'a> {
@@ -192,10 +210,18 @@ impl<'a> Context<'a> {
             funcs,
             tables,
             mems,
-            globals
+            globals,
+
+            // to be filled later when we enter any structured control construct in a function body
+            locals: Vec::new(),
+            labels: Vec::new(),
+            return_type: None
         }
     }
 }
+
+/// Result of executing instructions or blocks (there should be at most one result).
+type ResultType = Vec<ValType>;
 
 #[derive(Clone)]
 struct CtrlFrame {
