@@ -1,4 +1,4 @@
-use crate::{definitions::{FuncType, GlobalType, ImportDesc, Limits, TableType, ValType}, errors::ValidateError, module::Module};
+use crate::{definitions::{FuncType, GlobalType, ImportDesc, Limits, Mutability, TableType, ValType}, errors::ValidateError, module::Module};
 
 pub struct Validator<'a> {
     ctx: Context<'a>,
@@ -140,6 +140,61 @@ impl<'a> Validator<'a> {
         Ok(())
     }
 
+    /// Returns the local at the given index.
+    pub fn local_get(&self, index: u32) -> Result<ValType, ValidateError> {
+        let index = index as usize;
+
+        let local = *self.ctx.locals
+            .get(index)
+            .ok_or(ValidateError::LocalDoesntExist { index })?;
+
+        Ok(local)
+    }
+
+    /// Sets (technically just type checks) the value of the local at the given index.
+    pub fn local_set(&self, index: u32, val_type: ValType) -> Result<(), ValidateError> {
+        let local = self.local_get(index)?;
+
+        // types must be the same in order to set
+        if local != val_type {
+            return Err(ValidateError::LocalSetTypeMismatch { expect: local, actual: val_type });
+        }
+
+        // no need to mutate at self.ctx.locals[index] b/c we're just setting the same type
+        Ok(())
+    }
+
+    /// Returns the value type of the global at the given index.
+    pub fn global_get(&self, index: u32) -> Result<ValType, ValidateError> {
+        let index = index as usize;
+
+        let global = self.ctx.globals
+            .get(index)
+            .ok_or(ValidateError::GlobalDoesntExist { index })?;
+
+        Ok(global.val_type)
+    }
+
+    /// Sets (technically just types checks) the value of the global at the given index.
+    pub fn global_set(&self, index: u32, val_type: ValType) -> Result<(), ValidateError> {
+        let index = index as usize;
+
+        let global = self.ctx.globals
+            .get(index)
+            .ok_or(ValidateError::GlobalDoesntExist { index })?;
+
+        // types must be the same in order to set
+        if global.val_type != val_type {
+            return Err(ValidateError::GlobalSetTypeMismatch { expect: global.val_type, actual: val_type });
+        }
+
+        // global must be mutable
+        if global.mutability != Mutability::Var {
+            return Err(ValidateError::GlobalMustBeMutable { index });
+        }
+
+        Ok(())
+    }
 }
 
 struct Context<'a> {

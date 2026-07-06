@@ -43,4 +43,9 @@ pub enum ValidateError {
     ExpectedOperandInOpdStack { expect: ValType, actual: ValType },
     StackHeightMismatchAtEnd { expect: usize, actual: usize },
     InvalidInstr,
+    LocalDoesntExist{ index: usize },
+    LocalSetTypeMismatch{ expect: ValType, actual: ValType },
+    GlobalDoesntExist{ index: usize },
+    GlobalSetTypeMismatch{ expect: ValType, actual: ValType },
+    GlobalMustBeMutable{ index: usize },
 }

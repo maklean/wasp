@@ -402,6 +402,7 @@ impl TryFrom<u8> for ElemType {
 }
 
 /// Description/schema of a global variable.
+#[derive(Clone, Copy)]
 pub struct GlobalType {
     /// Type of the global's value.
     pub val_type: ValType,
@@ -426,6 +427,7 @@ impl GlobalType {
 }
 
 /// Details the possible mutabilities of data.
+#[derive(Clone, Copy, PartialEq)]
 pub enum Mutability {
     /// Immutable.
     Const,

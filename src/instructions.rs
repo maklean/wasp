@@ -484,6 +484,33 @@ impl Instr {
 
                     validator.push_opd(t);
                 }
+            
+            // Variable Instructions
+                Self::LocalGet(index) => {
+                    let t = validator.local_get(*index)?;
+                    validator.push_opd(t);
+                }
+
+                Self::LocalSet(index) => {
+                    let t = validator.pop_opd()?;
+                    validator.local_set(*index, t)?;
+                }
+
+                Self::LocalTee(index) => {
+                    let t = validator.pop_opd()?;
+                    validator.local_set(*index, t)?;
+                    validator.push_opd(t);
+                }
+
+                Self::GlobalGet(index) => {
+                    let t = validator.global_get(*index)?;
+                    validator.push_opd(t);
+                },
+
+                Self::GlobalSet(index) => {
+                    let t = validator.pop_opd()?;
+                    validator.global_set(*index, t)?;
+                }
 
             _ => Err(ValidateError::InvalidInstr)?
         }
