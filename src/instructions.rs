@@ -1,4 +1,4 @@
-use crate::{decoder::Decoder, definitions::ValType, errors::{DecodeError, ValidateError}, validator::Validator};
+use crate::{decoder::Decoder, definitions::ValType, errors::{DecodeError, ValidateError}, instructions::Instr::{MemoryGrow, MemorySize}, validator::Validator};
 
 /// Declares the end of an instruction sequence.
 const END_MARKER: u8 = 0x0B;
@@ -511,7 +511,43 @@ impl Instr {
                     let t = validator.pop_opd()?;
                     validator.global_set(*index, t)?;
                 }
+            
+            // Memory Instructions
+                Self::I32Load(m) | Self::I64Load(m) | Self::F32Load(m) | Self::F64Load(m)
+                    | Self::I32Load8S(m) | Self::I32Load8U(m)
+                    | Self::I32Load16S(m) | Self::I32Load16U(m)
+                    | Self::I64Load8S(m) | Self::I64Load8U(m)
+                    | Self::I64Load16S(m) | Self::I64Load16U(m)
+                    | Self::I64Load32S(m) | Self::I64Load32U(m)
+                    => {
+                        let t = self.val_type();
 
+                        validator.pop_opd_expect(ValType::I32)?;
+                        validator.mem_load(*m, self.bit_width())?;
+                        validator.push_opd(t);
+                    }
+                
+                Self::I32Store(m) | Self::I64Store(m) | Self::F32Store(m) | Self::F64Store(m)
+                    | Self::I32Store8(m) | Self::I32Store16(m)
+                    | Self::I64Store8(m) | Self::I64Store16(m) | Self::I64Store32(m)
+                    => {
+                        let t = self.val_type();
+
+                        validator.pop_opds(vec![ValType::I32, t])?;
+                        validator.mem_load(*m, self.bit_width())?;
+                    }
+                
+                MemorySize => {
+                    validator.verify_mem_exists()?;
+                    validator.push_opd(ValType::I32);
+                }
+
+                MemoryGrow => {
+                    validator.verify_mem_exists()?;
+                    validator.pop_opd_expect(ValType::I32)?;
+                    validator.push_opd(ValType::I32);
+                }
+                
             _ => Err(ValidateError::InvalidInstr)?
         }
         Ok(())
@@ -525,20 +561,23 @@ impl Instr {
             I32Eqz | I32Eq | I32Ne | I32LtS | I32LtU | I32GtS | I32GtU | I32LeS | I32LeU
                 | I32GeS | I32GeU | I32Clz | I32Ctz | I32Popcnt | I32Add | I32Sub | I32Mul
                 | I32DivS | I32DivU | I32RemS | I32RemU | I32And | I32Or | I32Xor | I32Shl
-                | I32ShrS | I32ShrU | I32Rotl | I32Rotr | I32Const(_) => ValType::I32,
+                | I32ShrS | I32ShrU | I32Rotl | I32Rotr | I32Const(_) | I32Load(_) | I32Load8S(_) 
+                | I32Load8U(_) | I32Load16S(_) | I32Load16U(_) => ValType::I32,
 
             I64Eqz | I64Eq | I64Ne | I64LtS | I64LtU | I64GtS | I64GtU | I64LeS | I64LeU
                 | I64GeS | I64GeU | I64Clz | I64Ctz | I64Popcnt | I64Add | I64Sub | I64Mul
                 | I64DivS | I64DivU | I64RemS | I64RemU | I64And | I64Or | I64Xor | I64Shl
-                | I64ShrS | I64ShrU | I64Rotl | I64Rotr | I64Const(_) => ValType::I64,
+                | I64ShrS | I64ShrU | I64Rotl | I64Rotr | I64Const(_) | I64Load(_) 
+                | I64Load8S(_) | I64Load8U(_) | I64Load16S(_) | I64Load16U(_) 
+                | I64Load32S(_) | I64Load32U(_) => ValType::I64,
 
             F32Eq | F32Ne | F32Lt | F32Gt | F32Le | F32Ge | F32Abs | F32Neg | F32Ceil
                 | F32Floor | F32Trunc | F32Nearest | F32Sqrt | F32Add | F32Sub | F32Mul
-                | F32Div | F32Min | F32Max | F32Copysign | F32Const(_) => ValType::F32,
+                | F32Div | F32Min | F32Max | F32Copysign | F32Const(_) | F32Load(_) => ValType::F32,
 
             F64Eq | F64Ne | F64Lt | F64Gt | F64Le | F64Ge | F64Abs | F64Neg | F64Ceil
                 | F64Floor | F64Trunc | F64Nearest | F64Sqrt | F64Add | F64Sub | F64Mul
-                | F64Div | F64Min | F64Max | F64Copysign | F64Const(_) => ValType::F64,
+                | F64Div | F64Min | F64Max | F64Copysign | F64Const(_) | F64Load(_) => ValType::F64,
 
             _ => unreachable!("val_type() called on non-numeric-typed instruction"),
         }
@@ -585,6 +624,27 @@ impl Instr {
 
         Ok(Self::If(block_type, then_instr, else_instr))
     }
+
+    /// Returns the number of bits actually read from/written to memory for this load/store instruction.
+    pub fn bit_width(&self) -> usize {
+        use Instr::*;
+
+        match self {
+            I32Load8S(_) | I32Load8U(_) | I64Load8S(_) | I64Load8U(_)
+                | I32Store8(_) | I64Store8(_) => 8,
+
+            I32Load16S(_) | I32Load16U(_) | I64Load16S(_) | I64Load16U(_)
+                | I32Store16(_) | I64Store16(_) => 16,
+
+            I64Load32S(_) | I64Load32U(_) | I64Store32(_) => 32,
+
+            I32Load(_) | F32Load(_) | I32Store(_) | F32Store(_) => 32,
+
+            I64Load(_) | F64Load(_) | I64Store(_) | F64Store(_) => 64,
+
+            _ => unreachable!("bit_width() called on non-memory-access instruction"),
+        }
+    }
 }
 
 pub enum BlockType {
@@ -604,6 +664,7 @@ impl BlockType {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct MemArg {
     pub align: u32,
     pub offset: u32,

@@ -1,4 +1,4 @@
-use crate::{definitions::{FuncType, GlobalType, ImportDesc, Limits, Mutability, TableType, ValType}, errors::ValidateError, module::Module};
+use crate::{definitions::{FuncType, GlobalType, ImportDesc, Limits, Mutability, TableType, ValType}, errors::ValidateError, instructions::MemArg, module::Module};
 
 pub struct Validator<'a> {
     ctx: Context<'a>,
@@ -191,6 +191,31 @@ impl<'a> Validator<'a> {
         // global must be mutable
         if global.mutability != Mutability::Var {
             return Err(ValidateError::GlobalMustBeMutable { index });
+        }
+
+        Ok(())
+    }
+
+    /// Checks whether a linear module is defined in the current module, throws an error if it doesn't.
+    pub fn verify_mem_exists(&self) -> Result<(), ValidateError> {
+        // this is hardcoded since there's only at most one linear memory allowed in Wasm 1.0
+        if self.ctx.mems.len() < 1 {
+            Err(ValidateError::LinearMemoryDoesntExist)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Checks the alignment of the given `MemArg` against the number of bytes in the `bit_width`.
+    pub fn mem_load(&self, mem_arg: MemArg, bit_width: usize) -> Result<(), ValidateError> {
+        self.verify_mem_exists()?;
+
+        // alignment must not be larger than bit width divided by 8
+        let alignment = 2u64.pow(mem_arg.align);
+        let num_bytes = (bit_width / 8) as u64;
+        
+        if alignment > num_bytes {
+            return Err(ValidateError::AlignmentIsLargerThanBitWidth{ alignment, num_bytes });
         }
 
         Ok(())
