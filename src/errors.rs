@@ -49,5 +49,5 @@ pub enum ValidateError {
     GlobalSetTypeMismatch{ expect: ValType, actual: ValType },
     GlobalMustBeMutable{ index: usize },
     LinearMemoryDoesntExist,
-    AlignmentIsLargerThanBitWidth { alignment: u64, num_bytes: u64 }
+    AlignmentIsLargerThanBitWidth { alignment: u64, num_bytes: u64 },
 }

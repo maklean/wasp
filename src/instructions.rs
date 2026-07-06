@@ -1,4 +1,4 @@
-use crate::{decoder::Decoder, definitions::ValType, errors::{DecodeError, ValidateError}, instructions::Instr::{MemoryGrow, MemorySize}, validator::Validator};
+use crate::{decoder::Decoder, definitions::ValType, errors::{DecodeError, ValidateError}, instructions::{self, Instr::{MemoryGrow, MemorySize}}, validator::Validator};
 
 /// Declares the end of an instruction sequence.
 const END_MARKER: u8 = 0x0B;
@@ -547,7 +547,46 @@ impl Instr {
                     validator.pop_opd_expect(ValType::I32)?;
                     validator.push_opd(ValType::I32);
                 }
-                
+            
+            // Control Instructions
+                Self::Nop => (),
+
+                Self::Unreachable => validator.unreachable()?,
+
+                Self::Block(block_type, instructions) => {
+                    let label_types: Vec<ValType> = (*block_type).try_into().unwrap();
+                    
+                    // label types and end types are the same for blocks (b/c branching goes to the end of a block)
+                    validator.push_ctrl(label_types.clone(), label_types);
+
+                    // validate body
+                    for instr in instructions {
+                        instr.validate(validator)?;
+                    }
+
+                    let end_types = validator.pop_ctrl()?;
+                    validator.push_opds(end_types);
+                }
+
+                Self::Loop(block_type, instructions) => {
+                    let label_types: Vec<ValType> = (*block_type).try_into().unwrap();
+                    
+                    // loop label types are empty (b/c loops don't have params in Wasm 1.0)
+                    validator.push_ctrl(vec![], label_types);
+
+                    // validate body
+                    for instr in instructions {
+                        instr.validate(validator)?;
+                    }
+
+                    let end_types = validator.pop_ctrl()?;
+                    validator.push_opds(end_types);
+                }
+
+                Self::If(block_type, then_block, else_block) => {
+                    
+                }
+
             _ => Err(ValidateError::InvalidInstr)?
         }
         Ok(())
@@ -647,9 +686,21 @@ impl Instr {
     }
 }
 
+#[derive(Clone, Copy)]
 pub enum BlockType {
     Empty,
     Val(ValType)
+}
+
+impl TryInto<Vec<ValType>> for BlockType {
+    type Error = ();
+
+    fn try_into(self) -> Result<Vec<ValType>, Self::Error> {
+        match self {
+            Self::Empty => Ok(vec![]),
+            Self::Val(val_type) => Ok(vec![val_type]),
+        }
+    }
 }
 
 impl BlockType {

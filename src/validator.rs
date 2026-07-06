@@ -125,6 +125,8 @@ impl<'a> Validator<'a> {
             return Err(ValidateError::StackHeightMismatchAtEnd { expect: self.opds.len(), actual: frame.height });
         }
 
+        self.ctrls.pop();
+
         Ok(frame.end_types)
     }
 
@@ -213,7 +215,7 @@ impl<'a> Validator<'a> {
         // alignment must not be larger than bit width divided by 8
         let alignment = 2u64.pow(mem_arg.align);
         let num_bytes = (bit_width / 8) as u64;
-        
+
         if alignment > num_bytes {
             return Err(ValidateError::AlignmentIsLargerThanBitWidth{ alignment, num_bytes });
         }
@@ -241,11 +243,8 @@ struct Context<'a> {
     /// List of locals in the current function (incl. params)
     locals: Vec<ValType>,
 
-    /// Stack of labels (represented by their - optional - result type) accessible from the current position.
-    labels: Vec<ResultType>,
-
     /// Return type of the current function being validated.
-    return_type: Option<ResultType>,
+    return_type: Option<Vec<ValType>>,
 }
 
 impl<'a> Context<'a> {
@@ -294,14 +293,10 @@ impl<'a> Context<'a> {
 
             // to be filled later when we enter any structured control construct in a function body
             locals: Vec::new(),
-            labels: Vec::new(),
             return_type: None
         }
     }
 }
-
-/// Result of executing instructions or blocks (there should be at most one result).
-type ResultType = Vec<ValType>;
 
 #[derive(Clone)]
 struct CtrlFrame {
