@@ -584,8 +584,27 @@ impl Instr {
                 }
 
                 Self::If(block_type, then_block, else_block) => {
-                    
-                }
+                    // both the 'then' and 'else' block are expected to produce the expected types
+                    let expected_types: Vec<ValType> = (*block_type).try_into().unwrap();
+
+                    // pop condition
+                    validator.pop_opd_expect(ValType::I32)?;
+
+                    for block in [then_block, else_block] {
+                        // label and end types are the same for each block
+                        validator.push_ctrl(expected_types.clone(), expected_types.clone());
+
+                        // validate instructions in block
+                        for instr in block {
+                            instr.validate(validator)?;
+                        }
+
+                        validator.pop_ctrl()?;
+                    }
+
+                    // push expected types onto the operand stack
+                    validator.push_opds(expected_types.clone());
+                },
 
             _ => Err(ValidateError::InvalidInstr)?
         }
