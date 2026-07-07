@@ -2,7 +2,11 @@ use crate::{definitions::{FuncType, GlobalType, ImportDesc, Limits, Mutability, 
 
 pub struct Validator<'a> {
     ctx: Context<'a>,
+
+    /// Operand Stack - keeps track of types of operand values.
     opds: Vec<ValType>,
+
+    /// Control Stack - keeps track of surrounding control constructs.
     ctrls: Vec<CtrlFrame>,
 }
 
@@ -55,10 +59,15 @@ impl<'a> Validator<'a> {
         Ok(())
     }
 
+    /// Pushes a value type onto the operand stack.
     pub fn push_opd(&mut self, val_type: ValType) {
         self.opds.push(val_type);
     }
 
+    /// Pops a value type from the operand stack.
+    /// If we're popping past the end of the current
+    /// control frame while being in dead/unreachable code,
+    /// `ValType::Unknown` is returned as the value type.
     pub fn pop_opd(&mut self) -> Result<ValType, ValidateError> {
         let Some(frame) = self.ctrls.last() else {
             return Err(ValidateError::ExpectedAtLeastOneControlFrame);
@@ -75,6 +84,7 @@ impl<'a> Validator<'a> {
         Ok(self.opds.pop().unwrap())
     }
 
+    /// Pops a value type off the operand stack as long as it matches the expected type.
     pub fn pop_opd_expect(&mut self, expect: ValType) -> Result<ValType, ValidateError> {
         let actual = self.pop_opd()?;
 
@@ -93,10 +103,12 @@ impl<'a> Validator<'a> {
         Ok(actual)
     }
 
+    /// Pushes a collection of value types onto the operand stack.
     pub fn push_opds(&mut self, mut val_types: Vec<ValType>) {
         self.opds.append(&mut val_types);
     }
 
+    /// Pops multiple operands from the operand stack as long as they match the given types.
     pub fn pop_opds(&mut self, val_types: Vec<ValType>) -> Result<(), ValidateError> {
         for expect in val_types.iter().rev() {
             self.pop_opd_expect(expect.clone())?;
@@ -105,11 +117,13 @@ impl<'a> Validator<'a> {
         Ok(())
     }
 
+    /// Creates a new control frame with the given label and end types, and pushes it onto the control stack.
     pub fn push_ctrl(&mut self, label_types: Vec<ValType>, end_types: Vec<ValType>) {
         let frame = CtrlFrame { label_types, end_types, height: self.opds.len(), unreachable: false };
         self.ctrls.push(frame);
     }
 
+    /// Pops a control frame from the control stack (will type-check for matching end types).
     pub fn pop_ctrl(&mut self) -> Result<Vec<ValType>, ValidateError> {
         if self.ctrls.last().is_none() {
             return Err(ValidateError::ExpectedAtLeastOneControlFrame);
@@ -130,6 +144,8 @@ impl<'a> Validator<'a> {
         Ok(frame.end_types)
     }
 
+    /// Declares the current control frame as unreachable and truncates 
+    /// the operand stack back to where said control frame begun.
     pub fn unreachable(&mut self) -> Result<(), ValidateError> {
         let Some(frame) = self.ctrls.last_mut() else {
             return Err(ValidateError::ExpectedAtLeastOneControlFrame);
