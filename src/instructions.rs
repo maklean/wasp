@@ -1,4 +1,4 @@
-use crate::{decoder::Decoder, definitions::ValType, errors::{DecodeError, ValidateError}, instructions::{self, Instr::{MemoryGrow, MemorySize}}, validator::Validator};
+use crate::{decoder::Decoder, definitions::{ElemType, ValType}, errors::{DecodeError, ValidateError}, instructions::{self, Instr::{MemoryGrow, MemorySize}}, validator::Validator};
 
 /// Declares the end of an instruction sequence.
 const END_MARKER: u8 = 0x0B;
@@ -609,10 +609,46 @@ impl Instr {
                 Self::Br(index) => validator.br(*index)?,
                 Self::BrIf(index) => validator.br_if(*index)?,
                 Self::BrTable(frame_indices, fallback) => validator.br_table(frame_indices, *fallback)?,
-
                 Self::Return => validator.return_instr()?,
 
-            _ => Err(ValidateError::InvalidInstr)?
+                Self::Call(index) => {
+                    let index = *index as usize;
+
+                    let func_type = validator.ctx.funcs
+                        .get(index)
+                        .ok_or(ValidateError::FunctionDoesntExist { index })?;
+
+                    let params = func_type.params.clone();
+                    let results = func_type.results.clone();
+
+                    // pop function params and push results
+                    validator.pop_opds(params)?;
+                    validator.push_opds(results);
+                },
+
+                Self::CallIndirect(index) => {
+                    let index = *index as usize;
+
+                    // make sure there's a table defined
+                    if validator.ctx.tables.len() < 1 {
+                        return Err(ValidateError::NoTableDefined);
+                    }
+                    
+                    // there should be a check for TableType.elem_type being funcref, but since it's the only variant, it's already valid
+                    
+                    let func_type = validator.ctx.types
+                        .get(index)
+                        .ok_or(ValidateError::FunctionDoesntExist { index })?;
+
+                    // pop index off
+                    validator.pop_opd_expect(ValType::I32)?;
+
+                    // pop function params and push results
+                    validator.pop_opds(func_type.params.clone())?;
+                    validator.push_opds(func_type.results.clone());
+                }
+
+            _ => return Err(ValidateError::InvalidInstr)
         }
         Ok(())
     }

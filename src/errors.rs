@@ -52,5 +52,6 @@ pub enum ValidateError {
     AlignmentIsLargerThanBitWidth { alignment: u64, num_bytes: u64 },
     InvalidControlFrameIndex { index: usize },
     ExpectedMatchingLabelTypes { expect: Vec<ValType>, actual: Vec<ValType> },
-    ReturnMustBePresentInContext,
+    FunctionDoesntExist{ index: usize },
+    NoTableDefined,
 }

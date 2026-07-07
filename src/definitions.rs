@@ -386,6 +386,7 @@ impl Limits {
 }
 
 /// Types of elements in a table (In Wasm 1.0, the only ElemType is a function reference / index to a Func).
+#[derive(PartialEq)]
 pub enum ElemType {
     FuncRef,
 }

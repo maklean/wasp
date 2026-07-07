@@ -1,13 +1,13 @@
 use crate::{definitions::{FuncType, GlobalType, ImportDesc, Limits, Mutability, TableType, ValType}, errors::ValidateError, instructions::MemArg, module::Module};
 
 pub struct Validator<'a> {
-    ctx: Context<'a>,
+    pub ctx: Context<'a>,
 
     /// Operand Stack - keeps track of types of operand values.
-    opds: Vec<ValType>,
+    pub opds: Vec<ValType>,
 
     /// Control Stack - keeps track of surrounding control constructs.
-    ctrls: Vec<CtrlFrame>,
+    pub ctrls: Vec<CtrlFrame>,
 }
 
 impl<'a> Validator<'a> {
@@ -259,6 +259,8 @@ impl<'a> Validator<'a> {
         )
     }
 
+    // TODO: Move these to Instr::validate()
+
     pub fn br(&mut self, index: u32) -> Result<(), ValidateError> {
         let target_ctrl = self.get_ctrl_frame(index)?;
 
@@ -320,27 +322,24 @@ impl<'a> Validator<'a> {
     }
 }
 
-struct Context<'a> {
+pub struct Context<'a> {
     /// The types of the functions declared in the current module.
-    types: &'a Vec<FuncType>,
+    pub types: &'a Vec<FuncType>,
 
     /// List of functions declared in the current module.
-    funcs: Vec<&'a FuncType>,
+    pub funcs: Vec<&'a FuncType>,
 
     /// List of tables declared in the current module.
-    tables: Vec<&'a TableType>,
+    pub tables: Vec<&'a TableType>,
 
     /// List of linear memories declared in the current module.
-    mems: Vec<&'a Limits>,
+    pub mems: Vec<&'a Limits>,
 
     /// List of globals declared in the current module.
-    globals: Vec<&'a GlobalType>,
+    pub globals: Vec<&'a GlobalType>,
 
     /// List of locals in the current function (incl. params)
-    locals: Vec<ValType>,
-
-    /// Return type of the current function being validated.
-    return_type: Option<Vec<ValType>>,
+    pub locals: Vec<ValType>,
 }
 
 impl<'a> Context<'a> {
@@ -387,9 +386,8 @@ impl<'a> Context<'a> {
             mems,
             globals,
 
-            // to be filled later when we enter any structured control construct in a function body
+            // to be filled later when we enter a function body
             locals: Vec::new(),
-            return_type: None
         }
     }
 }
