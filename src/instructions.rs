@@ -606,6 +606,12 @@ impl Instr {
                     validator.push_opds(expected_types.clone());
                 },
 
+                Self::Br(index) => validator.br(*index)?,
+                Self::BrIf(index) => validator.br_if(*index)?,
+                Self::BrTable(frame_indices, fallback) => validator.br_table(frame_indices, *fallback)?,
+
+                Self::Return => validator.return_instr()?,
+
             _ => Err(ValidateError::InvalidInstr)?
         }
         Ok(())

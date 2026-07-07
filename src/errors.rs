@@ -50,4 +50,7 @@ pub enum ValidateError {
     GlobalMustBeMutable{ index: usize },
     LinearMemoryDoesntExist,
     AlignmentIsLargerThanBitWidth { alignment: u64, num_bytes: u64 },
+    InvalidControlFrameIndex { index: usize },
+    ExpectedMatchingLabelTypes { expect: Vec<ValType>, actual: Vec<ValType> },
+    ReturnMustBePresentInContext,
 }

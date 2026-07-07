@@ -238,6 +238,86 @@ impl<'a> Validator<'a> {
 
         Ok(())
     }
+
+    fn check_frame_exists(&self, index: u32) -> Result<(), ValidateError> {
+        let index = index as usize;
+
+        if self.ctrls.len() <= index {
+            return Err(ValidateError::InvalidControlFrameIndex { index });
+        }
+
+        Ok(())
+    }
+
+    /// Gets the control frame at the given index.
+    fn get_ctrl_frame(&self, index: u32) -> Result<&CtrlFrame, ValidateError> {
+        self.check_frame_exists(index)?;
+
+        Ok(self.ctrls
+            .get(self.ctrls.len() - 1 - index as usize)
+            .unwrap()
+        )
+    }
+
+    pub fn br(&mut self, index: u32) -> Result<(), ValidateError> {
+        let target_ctrl = self.get_ctrl_frame(index)?;
+
+        // type-check against label types
+        self.pop_opds(target_ctrl.label_types.clone())?;
+
+        // this should allow for every other instruction left in the current control frame to be validated regardless of what's on the stack.
+        self.unreachable()?;
+
+        Ok(())
+    }
+
+    pub fn br_if(&mut self, index: u32) -> Result<(), ValidateError> {
+        let target_ctrl = self.get_ctrl_frame(index)?;
+        let types = target_ctrl.label_types.clone();
+
+        // pop condition
+        self.pop_opd_expect(ValType::I32)?;
+
+        // type-check against label types
+        self.pop_opds(types.clone())?;
+
+        // fallthrough path could still run, so we push back the operands
+        self.push_opds(types);
+
+        Ok(())
+    }
+
+    /// Basically a 'br' to any target in the `frame_indices` or at the `fallback_index`.
+    pub fn br_table(&mut self, frame_indices: &Vec<u32>, fallback_index: u32) -> Result<(), ValidateError> {
+        // pop index
+        self.pop_opd_expect(ValType::I32)?;
+        
+        let fallback_frame = self.get_ctrl_frame(fallback_index)?;
+        let expected_types = fallback_frame.label_types.clone();
+        
+        for &index in frame_indices {
+            let frame = self.get_ctrl_frame(index)?;
+
+            // must have the same label type as the fallback frame
+            if frame.label_types != fallback_frame.label_types {
+                return Err(ValidateError::ExpectedMatchingLabelTypes { 
+                    expect: expected_types, 
+                    actual: frame.label_types.clone() 
+                })
+            }
+        }
+
+        // basically like a 'br' at this point, all targets share the same expected types so we can type-check doing this
+        self.pop_opds(expected_types)?;
+        self.unreachable()?;
+        
+        Ok(())
+    }
+
+    pub fn return_instr(&mut self) -> Result<(), ValidateError> {
+        // should be the very last frame
+        self.br(self.ctrls.len() as u32 - 1)
+    }
 }
 
 struct Context<'a> {
