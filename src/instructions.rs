@@ -1,4 +1,4 @@
-use crate::{decoder::Decoder, definitions::{ElemType, ValType}, errors::{DecodeError, ValidateError}, instructions::{self, Instr::{MemoryGrow, MemorySize}}, validator::Validator};
+use crate::{decoder::Decoder, definitions::{ElemType, Mutability, ValType}, errors::{DecodeError, ValidateError}, instructions::{self, Instr::{MemoryGrow, MemorySize}}, validator::Validator};
 
 /// Declares the end of an instruction sequence.
 const END_MARKER: u8 = 0x0B;
@@ -21,6 +21,69 @@ impl Expr {
     /// Decodes an expression.
     pub fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
         Ok(Self { instructions: Instr::decode_sequence(decoder)? })
+    }
+
+    /// Validates an expression.
+    pub fn validate(&self, validator: &mut Validator, expected: Vec<ValType>) -> Result<(), ValidateError> {
+        validator.opds.clear();
+        validator.ctrls.clear();
+
+        validator.push_ctrl(expected.clone(), expected);
+
+        for instr in &self.instructions {
+            instr.validate(validator)?;
+        }
+
+        validator.pop_ctrl()?;
+
+        Ok(())
+    }
+
+    /// Validates a const expression.
+    pub fn validate_const_expr(&self, validator: &mut Validator, expected: Option<ValType>) -> Result<(), ValidateError> {
+        validator.opds.clear();
+        validator.ctrls.clear();
+
+        validator.push_ctrl(
+            expected.into_iter().collect(), 
+            expected.into_iter().collect()
+        );
+
+        for instr in &self.instructions {
+            match instr {
+                Instr::I32Const(_) | Instr::I64Const(_) 
+                | Instr::F32Const(_) | Instr::F64Const(_)
+                => {
+                    instr.validate(validator)?;
+                },
+
+                Instr::GlobalGet(index) => {
+                    let index = *index as usize;
+
+                    // const expressions as global initializers are constrained so they can only refer to imported globals
+                    if validator.ctx.num_imported_globals() <= index {
+                        return Err(ValidateError::GlobalMustBeImportedInConstExpr { index });
+                    }
+                    
+                    // ensure global is a const
+                    let global = validator.ctx.globals
+                        .get(index)
+                        .ok_or(ValidateError::GlobalDoesntExist { index })?;
+
+                    if global.mutability != Mutability::Const {
+                        return Err(ValidateError::NonConstantInstruction);
+                    }
+
+                    instr.validate(validator)?;
+                }
+
+                _ => return Err(ValidateError::NonConstantInstruction),
+            }
+        }
+
+        validator.pop_ctrl()?;
+
+        Ok(())
     }
 }
 

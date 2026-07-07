@@ -323,6 +323,8 @@ impl<'a> Validator<'a> {
 }
 
 pub struct Context<'a> {
+    module: &'a Module,
+
     /// The types of the functions declared in the current module.
     pub types: &'a Vec<FuncType>,
 
@@ -380,6 +382,8 @@ impl<'a> Context<'a> {
             .collect();
         
         Self {
+            module,
+
             types,
             funcs,
             tables,
@@ -390,10 +394,19 @@ impl<'a> Context<'a> {
             locals: Vec::new(),
         }
     }
+
+    /// Returns the number of globals from the module that are imports.
+    pub fn num_imported_globals(&self) -> usize {
+        self.module
+            .imports
+            .iter()
+            .filter(|im| matches!(im.desc, ImportDesc::Global(_)))
+            .count()
+    }
 }
 
 #[derive(Clone)]
-struct CtrlFrame {
+pub struct CtrlFrame {
     label_types: Vec<ValType>,
     end_types: Vec<ValType>,
     height: usize,

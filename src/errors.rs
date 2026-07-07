@@ -54,4 +54,6 @@ pub enum ValidateError {
     ExpectedMatchingLabelTypes { expect: Vec<ValType>, actual: Vec<ValType> },
     FunctionDoesntExist{ index: usize },
     NoTableDefined,
+    NonConstantInstruction,
+    GlobalMustBeImportedInConstExpr { index: usize },
 }
