@@ -1,4 +1,4 @@
-use crate::{decoder::Decoder, errors::{DecodeError, ValidateError}, instructions::Expr};
+use crate::{decoder::Decoder, errors::{DecodeError, ValidateError}, instructions::Expr, validator::Validator};
 
 /// Types that Wasm code can use for its values.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -109,6 +109,29 @@ impl Func {
 
         Ok(())
     }
+
+    /// Validates a `Func`.
+    pub fn validate(&self, validator: &mut Validator) -> Result<(), ValidateError> {
+        let func_type = validator.ctx.types
+            .get(self.type_idx as usize)
+            .ok_or(ValidateError::UndefinedFuncInContext { index: self.type_idx as usize })?;
+
+        // set locals to sequence of parameters and locals
+        validator.ctx.locals = func_type.params
+            .clone()
+            .into_iter()
+            .chain(
+                self.locals
+                    .clone()
+                    .into_iter()
+            )
+            .collect();
+    
+        // clears the operand and control frame stack, and sets up the function's control frame
+        self.body.validate(validator, func_type.results.clone())?;
+
+        Ok(())
+    }
 }
 
 /// Wasm module's table outline.
@@ -174,6 +197,14 @@ impl Global {
 
         Ok(Self { global_type, init })
     }
+
+    /// Validates a global variable.
+    pub fn validate(&self, validator: &mut Validator) -> Result<(), ValidateError> {
+        self.global_type.validate()?;
+        self.init.validate_const_expr(validator, Some(self.global_type.val_type))?;
+
+        Ok(())
+    }
 }
 
 /// A Wasm module element segment outline (initializes a subrange of a table).
@@ -189,6 +220,7 @@ pub struct Elem {
 }
 
 impl Elem {
+    /// Decodes an element segment.
     pub fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
         let table_idx = decoder.read_u32()?;
 
@@ -213,6 +245,25 @@ impl Elem {
         }
 
         Ok(Self { table_idx, offset, init })
+    }
+
+    /// Validates an element segment.
+    pub fn validate(&self, validator: &mut Validator) -> Result<(), ValidateError> {
+        let table_type = validator.ctx.tables
+            .get(self.table_idx as usize)
+            .ok_or(ValidateError::UndefinedTableInContext { index: self.table_idx as usize })?;
+        
+        table_type.validate()?;
+
+        self.offset.validate_const_expr(validator, Some(ValType::I32))?;
+
+        for func_idx in &self.init {
+            if validator.ctx.funcs.len() <= *func_idx as usize {
+                return Err(ValidateError::UndefinedFuncInContext { index: *func_idx as usize });
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -423,6 +474,7 @@ impl GlobalType {
 
     /// Validates a `GlobalType`.
     fn validate(&self) -> Result<(), ValidateError> {
+        // already valid
         Ok(())
     }
 }

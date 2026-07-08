@@ -13,6 +13,31 @@ pub struct Validator<'a> {
 impl<'a> Validator<'a> {
     pub fn validate(module: &'a Module) -> Result<(), ValidateError> {
         let mut this = Self { ctx: Context::new(module), opds: Vec::new(), ctrls: Vec::new() };
+
+        // validate functions
+        for func in &module.funcs {
+            func.validate(&mut this)?;
+        }
+
+        // validate tables
+        for table in &module.tables {
+            table.validate()?;
+        }
+
+        // validate linear memories
+        for mem in &module.mems {
+            mem.validate()?;
+        }
+
+        // validate globals
+        for global in &module.globals {
+            global.validate(&mut this)?;
+        }
+
+        // validate element segments
+        for elem in &module.elem {
+            elem.validate(&mut this)?
+        }
         
         Ok(())
     }
@@ -239,6 +264,7 @@ impl<'a> Validator<'a> {
         Ok(())
     }
 
+    /// Returns whether a control frame exists at the given index in the control frame stack.
     fn check_frame_exists(&self, index: u32) -> Result<(), ValidateError> {
         let index = index as usize;
 

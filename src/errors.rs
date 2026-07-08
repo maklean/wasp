@@ -56,4 +56,6 @@ pub enum ValidateError {
     NoTableDefined,
     NonConstantInstruction,
     GlobalMustBeImportedInConstExpr { index: usize },
+    UndefinedFuncInContext { index: usize },
+    UndefinedTableInContext { index: usize },
 }

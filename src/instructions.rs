@@ -44,9 +44,11 @@ impl Expr {
         validator.opds.clear();
         validator.ctrls.clear();
 
+        let end_types: Vec<ValType> = expected.into_iter().collect();
+
         validator.push_ctrl(
-            expected.into_iter().collect(), 
-            expected.into_iter().collect()
+            end_types.clone(),
+            end_types
         );
 
         for instr in &self.instructions {
