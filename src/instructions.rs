@@ -1,4 +1,4 @@
-use crate::{decoder::Decoder, definitions::{ElemType, Mutability, ValType}, errors::{DecodeError, ValidateError}, instructions::{self, Instr::{MemoryGrow, MemorySize}}, validator::Validator};
+use crate::{decoder::Decoder, definitions::{Mutability, ValType}, errors::{DecodeError, ValidateError}, validator::Validator};
 
 /// Declares the end of an instruction sequence.
 const END_MARKER: u8 = 0x0B;
@@ -600,12 +600,12 @@ impl Instr {
                         validator.mem_load(*m, self.bit_width())?;
                     }
                 
-                MemorySize => {
+                Self::MemorySize => {
                     validator.verify_mem_exists()?;
                     validator.push_opd(ValType::I32);
                 }
 
-                MemoryGrow => {
+                Self::MemoryGrow => {
                     validator.verify_mem_exists()?;
                     validator.pop_opd_expect(ValType::I32)?;
                     validator.push_opd(ValType::I32);
