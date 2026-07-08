@@ -38,6 +38,30 @@ impl<'a> Validator<'a> {
         for elem in &module.elem {
             elem.validate(&mut this)?
         }
+
+        // validate data segments
+        for data in &module.data {
+            data.validate(&mut this)?;
+        }
+
+        // validate start function (if it exists)
+        if let Some(start_func_idx) = module.start {
+            let start_func_idx = start_func_idx as usize;
+
+            let func = this.ctx.funcs
+                .get(start_func_idx)
+                .ok_or(ValidateError::UndefinedFuncInContext { index: start_func_idx })?;
+
+            // params and results have to be empty for the start function to be valid
+            if !func.params.is_empty() || !func.results.is_empty() {
+                return Err(ValidateError::InvalidStartFunction);
+            }
+        }
+
+        // validate exports
+        for export in &module.exports {
+            export.validate(&mut this)?;
+        }
         
         Ok(())
     }

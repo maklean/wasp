@@ -32,6 +32,7 @@ pub enum DecodeError {
     MalformedCodeSize,
 }
 
+// TODO: remove repetitive variants, some of these do the exact same thing
 #[derive(PartialEq, Eq, Debug)]
 pub enum ValidateError {
     LimitsMinLargerThanK(u64),
@@ -58,4 +59,7 @@ pub enum ValidateError {
     GlobalMustBeImportedInConstExpr { index: usize },
     UndefinedFuncInContext { index: usize },
     UndefinedTableInContext { index: usize },
+    UndefinedLinearMemoryInContext { index: usize },
+    UndefinedGlobalInContext { index: usize },
+    InvalidStartFunction,
 }

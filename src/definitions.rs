@@ -305,6 +305,17 @@ impl Data {
 
         Ok(Self { mem_idx, offset, init })
     }
+
+    /// Validates a data segment.
+    pub fn validate(&self, validator: &mut Validator) -> Result<(), ValidateError> {
+        if validator.ctx.mems.len() <= self.mem_idx as usize {
+            return Err(ValidateError::UndefinedLinearMemoryInContext { index: self.mem_idx as usize });
+        }
+
+        self.offset.validate_const_expr(validator, Some(ValType::I32))?;
+
+        Ok(())
+    }
 }
 
 /// Wasm module import outline.
@@ -363,6 +374,11 @@ impl Export {
         let desc = ExportDesc::decode(decoder)?;
 
         Ok(Self { name, desc })
+    }
+
+    /// Validates an export.
+    pub fn validate(&self, validator: &mut Validator) -> Result<(), ValidateError> {
+        self.desc.validate(validator)
     }
 }
 
@@ -554,6 +570,37 @@ impl ExportDesc {
             0x03 => Ok(Self::Global(decoder.read_u32()?)),
             _ => Err(DecodeError::InvalidExportDesc),
         }
+    }
+
+    /// Validates an `ExportDesc`
+    fn validate(&self, validator: &mut Validator) -> Result<(), ValidateError> {
+        match self {
+            Self::Func(idx) => {
+                if validator.ctx.funcs.len() <= *idx as usize {
+                    return Err(ValidateError::UndefinedFuncInContext { index: *idx as usize })
+                }
+            },
+
+            Self::Table(idx) => {
+                if validator.ctx.tables.len() <= *idx as usize {
+                    return Err(ValidateError::UndefinedTableInContext { index: *idx as usize })
+                }
+            },
+
+            Self::Mem(idx) => {
+                if validator.ctx.mems.len() <= *idx as usize {
+                    return Err(ValidateError::UndefinedLinearMemoryInContext { index: *idx as usize })
+                }
+            }
+
+            Self::Global(idx) => {
+                if validator.ctx.globals.len() <= *idx as usize {
+                    return Err(ValidateError::UndefinedGlobalInContext { index: *idx as usize })
+                }
+            }
+        };
+
+        Ok(())
     }
 }
 
