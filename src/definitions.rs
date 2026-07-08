@@ -161,7 +161,7 @@ pub struct Mem {
 }
 
 impl Mem {
-    const MEMORY_MAX: u64 = 65536;
+    pub const MEMORY_MAX: u64 = 65536;
 
     /// Decodes a linear memory from a sequence of bytes.
     pub fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
@@ -349,6 +349,11 @@ impl Import {
         let desc = ImportDesc::decode(decoder)?;
 
         Ok(Self { module, name, desc })
+    }
+
+    /// Validates an `Import`
+    pub fn validate(&self, validator: &mut Validator) -> Result<(), ValidateError> {
+        self.desc.validate(validator)
     }
 }
 
@@ -542,6 +547,25 @@ impl ImportDesc {
             0x03 => Ok(Self::Global(GlobalType::decode(decoder)?)),
             _ => Err(DecodeError::InvalidImportDesc),
         }
+    }
+
+    /// Validates an `ImportDesc`.
+    fn validate(&self, validator: &mut Validator) -> Result<(), ValidateError> {
+        match self {
+            Self::Func(idx) => {
+                if validator.ctx.types.len() <= *idx as usize {
+                    return Err(ValidateError::UndefinedFuncInContext { index: *idx as usize })
+                }
+            },
+
+            Self::Table(table_type) => table_type.validate()?,
+
+            Self::Mem(mem_type) => mem_type.validate(Mem::MEMORY_MAX)?,
+
+            Self::Global(global_type) => global_type.validate()?
+        };
+
+        Ok(())
     }
 }
 

@@ -58,9 +58,34 @@ impl<'a> Validator<'a> {
             }
         }
 
-        // validate exports
+        // validate exports + check for unique names
+        let mut seen_names = std::collections::HashSet::new();
+
         for export in &module.exports {
+            if !seen_names.insert(&export.name) {
+                return Err(ValidateError::DuplicateExportName { name: export.name.clone() });
+            }
+
             export.validate(&mut this)?;
+        }
+
+        // validate imports
+        for import in &module.imports {
+            import.validate(&mut this)?;
+        }
+
+        // validate functypes
+        for func_type in &module.types {
+            func_type.validate()?;
+        }
+
+        // check for too many tables or mems
+        if this.ctx.tables.len() > 1 {
+            return Err(ValidateError::TooManyTables);
+        }
+        
+        if this.ctx.mems.len() > 1 {
+            return Err(ValidateError::TooManyMems);
         }
         
         Ok(())
@@ -413,22 +438,34 @@ impl<'a> Context<'a> {
             )
             .collect();
 
-        // types of all tables
-        let tables: Vec<&'a TableType> = module.tables
+        // types of all imported tables + module tables
+        let tables: Vec<&'a TableType> = module.imports
             .iter()
-            .map(|t| &t.table_type)
+            .filter_map(|im| match &im.desc {
+                ImportDesc::Table(table_type) => Some(table_type),
+                _ => None,
+            })
+            .chain(module.tables.iter().map(|table| &table.table_type))
             .collect();
 
-        // All limits in linear memories
-        let mems: Vec<&'a Limits> = module.mems
+        // All limits in imported and module-defined linear memories
+        let mems: Vec<&'a Limits> = module.imports
             .iter()
-            .map(|m| &m.mem_type)
+            .filter_map(|im| match &im.desc {
+                ImportDesc::Mem(mem_type) => Some(mem_type),
+                _ => None,
+            })
+            .chain(module.mems.iter().map(|mem| &mem.mem_type))
             .collect();
 
-        // all global types in globals
-        let globals: Vec<&'a GlobalType> = module.globals
+        // all global types in imported and module-defined globals
+        let globals: Vec<&'a GlobalType> = module.imports
             .iter()
-            .map(|g| &g.global_type)
+            .filter_map(|im| match &im.desc {
+                ImportDesc::Global(global_type) => Some(global_type),
+                _ => None,
+            })
+            .chain(module.globals.iter().map(|global| &global.global_type))
             .collect();
         
         Self {

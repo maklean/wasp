@@ -62,4 +62,7 @@ pub enum ValidateError {
     UndefinedLinearMemoryInContext { index: usize },
     UndefinedGlobalInContext { index: usize },
     InvalidStartFunction,
+    TooManyTables,
+    TooManyMems,
+    DuplicateExportName { name: String }
 }
