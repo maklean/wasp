@@ -1,4 +1,4 @@
-use crate::{decoder::Decoder, definitions::{Mutability, ValType}, errors::{DecodeError, ValidateError}, validator::Validator};
+use crate::{decoder::Decoder, definitions::{Mutability, ValType}, errors::{DecodeError, ValidateError}, executor::{Activation, Addr, Label}, validator::Validator};
 
 /// Declares the end of an instruction sequence.
 const END_MARKER: u8 = 0x0B;
@@ -270,6 +270,14 @@ pub enum Instr {
     I64ReinterpretF64,
     F32ReinterpretI32,
     F64ReinterpretI64,
+
+    // Administrative Instructions (runtime)
+    Trap,
+    Invoke(Addr),
+    InitElem(Addr, u32, Vec<u32>),
+    InitData(Addr, u32, Vec<u8>),
+    Label(Label, Vec<Instr>),
+    Frmae(Activation, Vec<Instr>)
 }
 
 impl Instr {
@@ -711,8 +719,11 @@ impl Instr {
                     // pop function params and push results
                     validator.pop_opds(func_type.params.clone())?;
                     validator.push_opds(func_type.results.clone());
-                }
+                },
+
+                _ => return Err(ValidateError::InvalidInstr)
         }
+        
         Ok(())
     }
 
