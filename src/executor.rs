@@ -1,8 +1,8 @@
 use std::rc::Rc;
-use crate::definitions::{Func, FuncType, Mutability};
+use crate::{definitions::{Func, FuncType, Mutability}, instructions::Instr};
 
 /// Runtime representation of a Wasm value.
-pub enum ValType {
+pub enum Val {
     I32(i32),
     I64(i64),
     F32(f32),
@@ -10,8 +10,8 @@ pub enum ValType {
 }
 
 /// Outcome of a computation.
-pub enum Result {
-    Val(Vec<ValType>),
+pub enum ExecutionResult {
+    Val(Vec<Val>),
     Trap
 }
 
@@ -75,7 +75,7 @@ pub struct MemInstance {
 /// Runtime representation of a Wasm global variable.
 pub struct GlobalInstance {
     /// Runtime value.
-    pub value: ValType,
+    pub value: Val,
 
     /// Mutability.
     pub mutability: Mutability,
@@ -114,13 +114,13 @@ pub struct ExportInstance {
 /// Stack.
 pub struct Stack {
     /// Operands of instructions.
-    pub values: Vec<ValType>,
+    pub values: Vec<Val>,
 
     /// Active structured control instructions.
     pub labels: Vec<Label>,
 
     /// Call frames of active function calls.
-    pub activations: Vec<Frame>,
+    pub activations: Vec<Activation>,
 }
 
 /// Optional address to a function.
@@ -129,6 +129,7 @@ pub type FuncElem = Option<Addr>;
 /// Wasm address (basically an index).
 pub type Addr = usize;
 
+/// Wasm module export value.
 pub enum ExternVal {
     Func(Addr),
     Table(Addr),
@@ -138,8 +139,30 @@ pub enum ExternVal {
 
 /// Runtime representation of a structure control construct label.
 pub struct Label {
-    /// Argument arity.
+    /// Argument arity - number of values passed to the instruction sequence.
     pub arity: u32,
+
+    /// Instruction sequence - instructions to execute when this label is branched to.
+    pub instructions: Vec<Instr>,
 }
 
+/// Runtime activation of a function call.
+pub struct Activation {
+    /// Return arity of the function (at most one in Wasm 1.0).
+    pub arity: u32,
+
+    /// Function call frame.
+    pub frame: Frame,
+}
+
+/// Runtime function call frame.
+pub struct Frame {
+    /// Function arguments and local variables.
+    pub locals: Vec<Val>,
+
+    /// Reference to module instance.
+    pub module: Rc<ModuleInstance>,
+}
+
+/// Host function (leaving this for later)
 pub struct HostFunc;
