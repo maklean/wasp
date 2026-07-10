@@ -111,7 +111,7 @@ pub struct ExportInstance {
     pub value: ExternVal,
 }
 
-/// Stack.
+/// Runtime Wasm Stack.
 pub struct Stack {
     /// Operands of instructions.
     pub values: Vec<Val>,
