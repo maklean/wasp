@@ -810,10 +810,9 @@ impl Instr {
             I32Load16S(_) | I32Load16U(_) | I64Load16S(_) | I64Load16U(_)
                 | I32Store16(_) | I64Store16(_) => 16,
 
-            I64Load32S(_) | I64Load32U(_) | I64Store32(_) => 32,
-
-            I32Load(_) | F32Load(_) | I32Store(_) | F32Store(_) => 32,
-
+            I64Load32S(_) | I64Load32U(_) | I64Store32(_)
+            | I32Load(_) | F32Load(_) | I32Store(_) | F32Store(_) => 32,
+            
             I64Load(_) | F64Load(_) | I64Store(_) | F64Store(_) => 64,
 
             _ => unreachable!("bit_width() called on non-memory-access instruction"),
