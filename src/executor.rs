@@ -1,5 +1,5 @@
 use std::rc::Rc;
-use crate::{definitions::{Func, FuncType, Mutability}, instructions::Instr};
+use crate::definitions::{Func, FuncType, Mutability};
 
 /// Runtime representation of a Wasm value.
 pub enum Val {
@@ -111,18 +111,6 @@ pub struct ExportInstance {
     pub value: ExternVal,
 }
 
-/// Runtime Wasm Stack.
-pub struct Stack {
-    /// Operands of instructions.
-    pub values: Vec<Val>,
-
-    /// Active structured control instructions.
-    pub labels: Vec<Label>,
-
-    /// Call frames of active function calls.
-    pub activations: Vec<Activation>,
-}
-
 /// Optional address to a function.
 pub type FuncElem = Option<Addr>;
 
@@ -137,32 +125,35 @@ pub enum ExternVal {
     Global(Addr),
 }
 
-/// Runtime representation of a structure control construct label.
-pub struct Label {
-    /// Argument arity - number of values passed to the instruction sequence.
-    pub arity: u32,
-
-    /// Instruction sequence - instructions to execute when this label is branched to.
-    pub instructions: Vec<Instr>,
-}
-
-/// Runtime activation of a function call.
-pub struct Activation {
-    /// Return arity of the function (at most one in Wasm 1.0).
-    pub arity: u32,
-
-    /// Function call frame.
-    pub frame: Frame,
-}
-
 /// Runtime function call frame.
+#[derive(Debug, Default, Clone, Copy)]
 pub struct Frame {
-    /// Function arguments and local variables.
-    pub locals: Vec<Val>,
+    /// Number of values the function returns.
+    pub arity: usize,
 
-    /// Reference to module instance.
-    pub module: Rc<ModuleInstance>,
+    /// Where the function's locals begin in the `locals` stack.
+    pub locals_start: usize,
+
+    /// Where the function's values begin in the `values` stack.
+    pub values_start: usize,
+}
+
+/// Runtime structured control construct (block/loop).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Block {
+    /// Number of values this block/loop produces.
+    pub arity: usize,
+
+    /// `values` stack height once we entered this block/loop.
+    pub values_start: usize,
 }
 
 /// Host function (leaving this for later)
 pub struct HostFunc;
+
+pub struct Executor {
+    pub values: Vec<Val>,
+    pub locals: Vec<Val>,
+    pub current_frame: Frame,
+    pub current_block: Block,
+}
