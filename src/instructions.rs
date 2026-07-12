@@ -712,8 +712,6 @@ impl Instr {
                     validator.pop_opds(func_type.params.clone())?;
                     validator.push_opds(func_type.results.clone());
                 },
-
-                _ => return Err(ValidateError::InvalidInstr)
         }
         
         Ok(())
