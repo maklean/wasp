@@ -220,6 +220,7 @@ impl Executor {
     ) -> Result<Option<usize>, ExecuteError> {
         for instr in instrs {
             match instr {
+                // Control Instructions
                 Instr::Unreachable => return Err(ExecuteError::Trapped),
                 Instr::Nop => {},
 
@@ -353,6 +354,7 @@ impl Executor {
         self.current_block = prev;
     }
     
+    /// Returns the arity of the given `BlockType`.
     fn block_arity(block_type: BlockType) -> usize {
         match block_type {
             BlockType::Empty => 0,
