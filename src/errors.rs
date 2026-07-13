@@ -66,3 +66,8 @@ pub enum ValidateError {
     TooManyMems,
     DuplicateExportName { name: String }
 }
+
+pub enum ExecuteError {
+    UnexpectedStackUnderflow,
+    ExpectedValType { expect: ValType, actual: ValType }
+}
