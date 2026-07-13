@@ -1,5 +1,5 @@
 use std::rc::Rc;
-use crate::{definitions::{Func, FuncType, Mutability, ValType}, errors::ExecuteError};
+use crate::{definitions::{Func, FuncType, Mutability, ValType}, errors::ExecuteError, instructions::{BlockType, Instr}};
 
 /// Runtime representation of a Wasm value.
 pub enum Val {
@@ -7,6 +7,36 @@ pub enum Val {
     I64(i64),
     F32(f32),
     F64(f64)
+}
+
+impl Val {
+    pub fn as_i32(&self) -> i32 { 
+        match self {
+            Self::I32(v) => *v,
+            _ => unreachable!()
+        }
+    }
+
+    pub fn as_i64(&self) -> i64 { 
+        match self {
+            Self::I64(v) => *v,
+            _ => unreachable!()
+        }
+    }
+
+    pub fn as_f32(&self) -> f32 { 
+        match self {
+            Self::F32(v) => *v,
+            _ => unreachable!()
+        }
+    }
+
+    pub fn as_f64(&self) -> f64 { 
+        match self {
+            Self::F64(v) => *v,
+            _ => unreachable!()
+        }
+    }
 }
 
 impl TryInto<ValType> for Val {
@@ -181,6 +211,110 @@ impl Executor {
         }
     }
 
+    pub fn execute(
+        &mut self, 
+        instrs: &[Instr], 
+        level: usize, 
+        store: &mut Store, 
+        module: &Rc<ModuleInstance>
+    ) -> Result<Option<usize>, ExecuteError> {
+        for instr in instrs {
+            match instr {
+                Instr::Unreachable => return Err(ExecuteError::Trapped),
+                Instr::Nop => {},
+
+                Instr::I32Const(v) => self.push_value(Val::I32(*v)),
+                Instr::I64Const(v) => self.push_value(Val::I64(*v)),
+                Instr::F32Const(v) => self.push_value(Val::F32(*v)),
+                Instr::F64Const(v) => self.push_value(Val::F64(*v)),
+
+                Instr::Drop => { self.pop_value()?; },
+
+                Instr::Block(block_type, body) => {
+                    let arity = Self::block_arity(*block_type);
+                    let prev = self.enter_block(arity);
+
+                    // execute instructions in block with nested level
+                    let branch = self.execute(body, level + 1, store, module)?;
+                
+                    // check if we're unwinding to a branch that's further up
+                    let unwinding = branch.is_some_and(|target| target <= level);
+                    self.exit_block(prev, unwinding);
+
+                    /*
+                        if we exited the block through a br/br_if/return 
+                        and we're unwinding, we should exit
+                        early.
+                    */
+                    if unwinding {
+                        return Ok(branch);
+                    }
+                },
+
+                Instr::Loop(_block_type, body) => {
+                    // arity for loops is always 0
+                    let prev = self.enter_block(0);
+                    let current_level = level + 1;
+
+                    loop {
+                        let return_level = self.execute(body, level + 1, store, module)?;
+
+                        if return_level == Some(current_level) {
+                            continue;
+                        }
+
+                        let unwinding = return_level.is_some_and(|target| target <= level);
+                        self.exit_block(prev, unwinding);
+
+                        // looping
+                        if unwinding {
+                            return Ok(return_level);
+                        }
+
+                        break;
+                    }
+                },
+
+                Instr::If(block_type, then_block, else_block) => {
+                    let condition = self.pop_value()?.as_i32();
+                    let prev = self.enter_block(Self::block_arity(*block_type));
+
+                    // execute block based on condition
+                    let return_level = if condition != 0 {
+                        self.execute(then_block, level + 1, store, module)?
+                    } else {
+                        self.execute(else_block, level + 1, store, module)?
+                    };
+
+                    let unwinding = return_level.is_some_and(|target| target <= level);
+                    self.exit_block(prev, unwinding);
+
+                    if unwinding {
+                        return Ok(return_level);
+                    }
+                }
+
+                Instr::Br(label) => {
+                    return Ok(Some(level - *label as usize));
+                }
+
+                Instr::BrIf(label) => {
+                    let condition = self.pop_value()?.as_i32();
+
+                    if condition != 0 {
+                        return Ok(Some(level - *label as usize));
+                    }
+                }
+
+                Instr::Return => return Ok(Some(0)),
+
+                _ => todo!()
+            }
+        }
+
+        Ok(None)
+    }
+
     /// Pushes a value onto the value/operand stack.
     pub fn push_value(&mut self, v: Val) {
         self.values.push(v);
@@ -219,4 +353,10 @@ impl Executor {
         self.current_block = prev;
     }
     
+    fn block_arity(block_type: BlockType) -> usize {
+        match block_type {
+            BlockType::Empty => 0,
+            BlockType::Val(_) => 1,
+        }
+    }
 }

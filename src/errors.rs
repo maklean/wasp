@@ -69,5 +69,6 @@ pub enum ValidateError {
 
 pub enum ExecuteError {
     UnexpectedStackUnderflow,
-    ExpectedValType { expect: ValType, actual: ValType }
+    ExpectedValType { expect: ValType, actual: ValType },
+    Trapped,
 }
