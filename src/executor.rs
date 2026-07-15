@@ -37,6 +37,16 @@ impl Val {
             _ => unreachable!()
         }
     }
+
+    pub fn zero(val_type: ValType) -> Self {
+        match val_type {
+            ValType::I32 => Self::I32(0),
+            ValType::I64 => Self::I64(0),
+            ValType::F32 => Self::F32(0.0),
+            ValType::F64 => Self::F64(0.0),
+            _ => unreachable!()
+        }
+    }
 }
 
 impl TryInto<ValType> for Val {
@@ -78,13 +88,13 @@ pub enum FuncInstance {
     /// A function defined inside a Wasm module.
     Wasm {
         /// Signature of the function.
-        func_type: FuncType,
+        func_type: Rc<FuncType>,
 
-        /// Originating module (used to resolve references to other definitions).
+        /// Originating module.
         module: Rc<ModuleInstance>,
 
         /// Function definition.
-        code: Func,
+        code: Rc<Func>,
     },
 
     /// A function provided by the host (import).
@@ -244,8 +254,7 @@ impl Executor {
 
                     /*
                         if we exited the block through a br/br_if/return 
-                        and we're unwinding, we should exit
-                        early.
+                        and we're unwinding, we should exit early.
                     */
                     if unwinding {
                         return Ok(branch);
@@ -328,6 +337,42 @@ impl Executor {
             .ok_or(ExecuteError::UnexpectedStackUnderflow)
     }
 
+    /// Enters a new function control frame.
+    pub fn enter_frame(&mut self, func_type: FuncType) -> Result<Frame, ExecuteError> {
+        let locals_start = self.locals.len();
+
+        // add function params to locals
+        for _ in 0..func_type.params.len() {
+            let v = self.pop_value()?;
+            self.locals.push(v);
+        }
+        self.locals[locals_start..].reverse();
+
+        // set the new frame as the current frame
+        let values_start = self.values.len();
+        let prev = self.current_frame;
+
+        self.current_frame = Frame {
+            arity: func_type.results.len(),
+            locals_start,
+            values_start
+        }; 
+
+        Ok(prev)
+    }
+
+    /// Exits the current frame and restores the previous one.
+    /// Keeps `arity` results on the operand stack.
+    pub fn exit_frame(&mut self, prev: Frame) {
+        let curr_frame = self.current_frame;
+
+        // remove locals and function operands
+        self.locals.truncate(curr_frame.locals_start);
+        self.values.drain(curr_frame.values_start..self.values.len()-curr_frame.arity);
+
+        self.current_frame = prev;
+    }
+
     /// Enters a new structured control construct (block/loop/if) that returns `arity` values. Returns the current block.
     fn enter_block(&mut self, arity: usize) -> Block {
         let prev = self.current_block;
@@ -352,6 +397,32 @@ impl Executor {
         }
 
         self.current_block = prev;
+    }
+
+    /// Calls the function at the given index.
+    fn call_function(&mut self, func_idx: usize, store: &mut Store) -> Result<(), ExecuteError> {
+        let func = store.funcs
+            .get(func_idx)
+            .expect(&format!("Function at index {func_idx} should exist."));
+        
+        match func {
+            FuncInstance::Host { func_type, code } => {
+                // TODO: implement host function calling
+            },
+
+            FuncInstance::Wasm { func_type, module, code } => {
+                let module = Rc::clone(module);
+                let code = Rc::clone(code);
+
+                for v in code.locals.iter().copied().map(Val::zero) {
+                    self.locals.push(v);
+                }
+
+                self.execute(&code.body.instructions, 0, store, &module)?;
+            }
+        }
+        
+        Ok(())
     }
     
     /// Returns the arity of the given `BlockType`.
