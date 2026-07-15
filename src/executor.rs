@@ -314,9 +314,25 @@ impl Executor {
                     if condition != 0 {
                         return Ok(Some(level - *label as usize));
                     }
+                },
+
+                Instr::BrTable(frame_indices, fallback) => {
+                    let label_idx = self.pop_value()?.as_i32() as usize;
+
+                    if frame_indices.len() <= label_idx {
+                        let label = frame_indices
+                            .get(label_idx)
+                            .expect("label index should exist.");
+
+                        return Ok(Some(level - *label as usize));
+                    }
+
+                    return Ok(Some(level - *fallback as usize));
                 }
 
                 Instr::Return => return Ok(Some(0)),
+
+                Instr::Call(func_idx) => self.call_function(*func_idx, store)?,
 
                 _ => todo!()
             }
@@ -400,9 +416,9 @@ impl Executor {
     }
 
     /// Calls the function at the given index.
-    fn call_function(&mut self, func_idx: usize, store: &mut Store) -> Result<(), ExecuteError> {
+    fn call_function(&mut self, func_idx: u32, store: &mut Store) -> Result<(), ExecuteError> {
         let func = store.funcs
-            .get(func_idx)
+            .get(func_idx as usize)
             .expect(&format!("Function at index {func_idx} should exist."));
         
         match func {
