@@ -358,18 +358,19 @@ impl Executor {
                     // get function element index
                     let func_addr = table.elem
                         .get(i)
-                        .ok_or(ExecuteError::Trapped)?
-                        .ok_or(ExecuteError::Trapped)?;
+                        .ok_or(ExecuteError::Trapped)? // invalid function address index 
+                        .ok_or(ExecuteError::Trapped)?; // invalid function address
 
                     let func = store.funcs
                         .get(func_addr)
                         .expect("Table element should point to a valid function.");
                     
                     let actual_type = match func {
-                        FuncInstance::Wasm { func_type, module, code } => func_type,
-                        FuncInstance::Host { func_type, code } => func_type
+                        FuncInstance::Wasm { func_type, module: _, code: _ } => func_type,
+                        FuncInstance::Host { func_type, code: _ } => func_type
                     };
 
+                    // types should match
                     if *expect_type != **actual_type {
                         return Err(ExecuteError::Trapped);
                     }
@@ -465,7 +466,7 @@ impl Executor {
             .expect(&format!("Function at index {func_idx} should exist."));
         
         match func {
-            FuncInstance::Host { func_type, code } => {
+            FuncInstance::Host { func_type: _, code: _ } => {
                 // TODO: implement host function calling
             },
 
