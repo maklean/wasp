@@ -460,6 +460,111 @@ impl Executor {
                     global.value = val;
                 }
 
+                // Memory Instructions
+                Instr::I32Load(arg) => {
+                    let a = *module.mem_addrs
+                        .get(0)
+                        .ok_or(ExecuteError::InvalidMemAddressIndex)?;
+
+                    let mem = store.mems
+                        .get(a)
+                        .expect("Memory instance should exist.");
+                    
+                    let i = self.pop_value()?.as_i32();
+
+                    let ea = (i as u32).checked_add(arg.offset).ok_or(ExecuteError::Trapped)?;
+                    let end = (ea as usize).checked_add(4).ok_or(ExecuteError::Trapped)?;
+                    
+                    if end > mem.data.len() {
+                        return Err(ExecuteError::Trapped);
+                    }
+
+                    let ea = ea as usize;
+                    let bytes: [u8; 4] = mem.data[ea..ea+4]
+                        .try_into()
+                        .expect("slice should be exactly 4 bytes");
+
+                    self.push_value(Val::I32(i32::from_le_bytes(bytes)));
+                },
+
+                Instr::I64Load(arg) => {
+                    let a = *module.mem_addrs
+                        .get(0)
+                        .ok_or(ExecuteError::InvalidMemAddressIndex)?;
+
+                    let mem = store.mems
+                        .get(a)
+                        .expect("Memory instance should exist.");
+                    
+                    let i = self.pop_value()?.as_i32();
+
+                    let ea = (i as u32).checked_add(arg.offset).ok_or(ExecuteError::Trapped)?;
+                    let end = (ea as usize).checked_add(8).ok_or(ExecuteError::Trapped)?;
+                    
+                    if end > mem.data.len() {
+                        return Err(ExecuteError::Trapped);
+                    }
+
+                    let ea = ea as usize;
+                    let bytes: [u8; 8] = mem.data[ea..ea+8]
+                        .try_into()
+                        .expect("slice should be exactly 8 bytes");
+
+                    self.push_value(Val::I64(i64::from_le_bytes(bytes)));
+                },
+
+                Instr::F32Load(arg) => {
+                    let a = *module.mem_addrs
+                        .get(0)
+                        .ok_or(ExecuteError::InvalidMemAddressIndex)?;
+
+                    let mem = store.mems
+                        .get(a)
+                        .expect("Memory instance should exist.");
+                    
+                    let i = self.pop_value()?.as_i32();
+
+                    let ea = (i as u32).checked_add(arg.offset).ok_or(ExecuteError::Trapped)?;
+                    let end = (ea as usize).checked_add(4).ok_or(ExecuteError::Trapped)?;
+                    
+                    if end > mem.data.len() {
+                        return Err(ExecuteError::Trapped);
+                    }
+
+                    let ea = ea as usize;
+                    let bytes: [u8; 4] = mem.data[ea..ea+4]
+                        .try_into()
+                        .expect("slice should be exactly 4 bytes");
+
+                    self.push_value(Val::F32(f32::from_le_bytes(bytes)));
+                },
+
+                Instr::F64Load(arg) => {
+                    let a = *module.mem_addrs
+                        .get(0)
+                        .ok_or(ExecuteError::InvalidMemAddressIndex)?;
+
+                    let mem = store.mems
+                        .get(a)
+                        .expect("Memory instance should exist.");
+                    
+                    let i = self.pop_value()?.as_i32();
+
+                    let ea = (i as u32).checked_add(arg.offset).ok_or(ExecuteError::Trapped)?;
+                    let end = (ea as usize).checked_add(8).ok_or(ExecuteError::Trapped)?;
+                    
+                    if end > mem.data.len() {
+                        return Err(ExecuteError::Trapped);
+                    }
+
+                    let ea = ea as usize;
+                    let bytes: [u8; 8] = mem.data[ea..ea+8]
+                        .try_into()
+                        .expect("slice should be exactly 8 bytes");
+
+                    self.push_value(Val::F64(f64::from_le_bytes(bytes)));
+                }
+
                 _ => todo!()
             }
         }

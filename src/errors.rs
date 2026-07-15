@@ -74,4 +74,5 @@ pub enum ExecuteError {
     InvalidTypeIndex,
     InvalidFuncIndex,
     InvalidGlobalIndex,
+    InvalidMemAddressIndex,
 }
