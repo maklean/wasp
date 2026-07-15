@@ -239,8 +239,6 @@ impl Executor {
                 Instr::F32Const(v) => self.push_value(Val::F32(*v)),
                 Instr::F64Const(v) => self.push_value(Val::F64(*v)),
 
-                Instr::Drop => { self.pop_value()?; },
-
                 Instr::Block(block_type, body) => {
                     let arity = Self::block_arity(*block_type);
                     let prev = self.enter_block(arity);
@@ -376,6 +374,22 @@ impl Executor {
                     }
 
                     self.call_function(func_addr, store)?;
+                },
+
+                // Parametric Instructions
+                Instr::Drop => { self.pop_value()?; },
+
+                Instr::Select => {
+                    let c = self.pop_value()?.as_i32();
+
+                    let val_2 = self.pop_value()?;
+                    let val_1 = self.pop_value()?;
+
+                    if c != 0 {
+                        self.push_value(val_1);
+                    } else {
+                        self.push_value(val_2);
+                    }
                 }
 
                 _ => todo!()
