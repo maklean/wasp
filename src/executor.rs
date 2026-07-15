@@ -2,6 +2,7 @@ use std::rc::Rc;
 use crate::{definitions::{Func, FuncType, Mutability, ValType}, errors::ExecuteError, instructions::{BlockType, Instr}};
 
 /// Runtime representation of a Wasm value.
+#[derive(Debug, Clone, Copy)]
 pub enum Val {
     I32(i32),
     I64(i64),
@@ -390,6 +391,73 @@ impl Executor {
                     } else {
                         self.push_value(val_2);
                     }
+                },
+
+                // Variable Instructions
+                Instr::LocalGet(local_idx) => {
+                    let local_idx: usize = *local_idx as usize;
+                    
+                    let local = self.locals
+                        .get(self.current_frame.locals_start + local_idx)
+                        .expect("Local should exist.");
+                    
+                    self.push_value(*local);
+                },
+
+                Instr::LocalSet(local_idx) => {
+                    let local_idx: usize = *local_idx as usize;
+
+                    let val = self.pop_value()?;
+
+                    let local = self.locals
+                        .get_mut(self.current_frame.locals_start + local_idx)
+                        .expect("Local should exist.");
+
+                    *local = val;
+                },
+
+                Instr::LocalTee(local_idx) => {
+                    let local_idx: usize = *local_idx as usize;
+
+                    let val = self.pop_value()?;
+
+                    self.push_value(val);
+
+                    let local = self.locals
+                        .get_mut(self.current_frame.locals_start + local_idx)
+                        .expect("Local should exist.");
+
+                    *local = val;
+                },
+
+                Instr::GlobalGet(global_idx) => {
+                    let global_idx: usize = *global_idx as usize;
+
+                    let global_addr = *module.global_addrs
+                        .get(global_idx)
+                        .ok_or(ExecuteError::InvalidGlobalIndex)?;
+
+                    let global = store.globals
+                        .get(global_addr)
+                        .expect("Global should exist.");
+
+                    self.push_value(global.value);
+                },
+
+                Instr::GlobalSet(global_idx) => {
+                    let global_idx: usize = *global_idx as usize;
+
+                    let val = self.pop_value()?;
+
+                    let global_addr = *module.global_addrs
+                        .get(global_idx)
+                        .ok_or(ExecuteError::InvalidGlobalIndex)?;
+                    
+                    let global = store.globals
+                        .get_mut(global_addr)
+                        .expect("Global should exist.");
+
+                    global.value = val;
                 }
 
                 _ => todo!()

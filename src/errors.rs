@@ -73,4 +73,5 @@ pub enum ExecuteError {
     Trapped,
     InvalidTypeIndex,
     InvalidFuncIndex,
+    InvalidGlobalIndex,
 }
