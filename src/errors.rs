@@ -71,4 +71,6 @@ pub enum ExecuteError {
     UnexpectedStackUnderflow,
     ExpectedValType { expect: ValType, actual: ValType },
     Trapped,
+    InvalidTypeIndex,
+    InvalidFuncIndex,
 }

@@ -25,6 +25,7 @@ impl TryFrom<u8> for ValType {
 }
 
 /// Signature of functions; maps vector of parameters to vector of results (in Wasm 1.0, there's only at most 1 result returned).
+#[derive(PartialEq, Clone)]
 pub struct FuncType {
     /// Function parameters.
     pub params: Vec<ValType>,

@@ -100,10 +100,10 @@ pub enum FuncInstance {
     /// A function provided by the host (import).
     Host {
         /// Signature of the function.
-        func_type: FuncType,
+        func_type: Rc<FuncType>,
 
         /// Host function.
-        code: HostFunc,
+        code: Rc<HostFunc>,
     }
 }
 
@@ -319,7 +319,7 @@ impl Executor {
                 Instr::BrTable(frame_indices, fallback) => {
                     let label_idx = self.pop_value()?.as_i32() as usize;
 
-                    if frame_indices.len() <= label_idx {
+                    if label_idx <= frame_indices.len() {
                         let label = frame_indices
                             .get(label_idx)
                             .expect("label index should exist.");
@@ -332,7 +332,50 @@ impl Executor {
 
                 Instr::Return => return Ok(Some(0)),
 
-                Instr::Call(func_idx) => self.call_function(*func_idx, store)?,
+                Instr::Call(func_idx) => {
+                    let addr = module.func_addrs
+                        .get(*func_idx as usize)
+                        .ok_or(ExecuteError::InvalidFuncIndex)?;
+
+                    self.call_function(*addr, store)?;
+                },
+                
+                Instr::CallIndirect(type_idx) => {
+                    let expect_type = module.types
+                        .get(*type_idx as usize)
+                        .ok_or(ExecuteError::InvalidTypeIndex)?;
+                    
+                    let i = self.pop_value()?.as_i32() as usize;
+
+                    let table_idx = *module.table_addrs
+                        .get(0)
+                        .expect("There should be one table defined.");
+
+                    let table = store.tables
+                        .get(table_idx)
+                        .unwrap();
+
+                    // get function element index
+                    let func_addr = table.elem
+                        .get(i)
+                        .ok_or(ExecuteError::Trapped)?
+                        .ok_or(ExecuteError::Trapped)?;
+
+                    let func = store.funcs
+                        .get(func_addr)
+                        .expect("Table element should point to a valid function.");
+                    
+                    let actual_type = match func {
+                        FuncInstance::Wasm { func_type, module, code } => func_type,
+                        FuncInstance::Host { func_type, code } => func_type
+                    };
+
+                    if *expect_type != **actual_type {
+                        return Err(ExecuteError::Trapped);
+                    }
+
+                    self.call_function(func_addr, store)?;
+                }
 
                 _ => todo!()
             }
@@ -416,9 +459,9 @@ impl Executor {
     }
 
     /// Calls the function at the given index.
-    fn call_function(&mut self, func_idx: u32, store: &mut Store) -> Result<(), ExecuteError> {
+    fn call_function(&mut self, func_idx: usize, store: &mut Store) -> Result<(), ExecuteError> {
         let func = store.funcs
-            .get(func_idx as usize)
+            .get(func_idx)
             .expect(&format!("Function at index {func_idx} should exist."));
         
         match func {
@@ -430,11 +473,15 @@ impl Executor {
                 let module = Rc::clone(module);
                 let code = Rc::clone(code);
 
+                let prev_frame = self.enter_frame((**func_type).clone())?;
+
                 for v in code.locals.iter().copied().map(Val::zero) {
                     self.locals.push(v);
                 }
 
                 self.execute(&code.body.instructions, 0, store, &module)?;
+            
+                self.exit_frame(prev_frame);
             }
         }
         
