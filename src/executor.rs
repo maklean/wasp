@@ -531,6 +531,51 @@ impl Executor {
                     self.push_value(Val::I64(u32::from_le_bytes(bytes[..4].try_into().unwrap()) as i64));
                 },
 
+                Instr::I32Store(arg) => {
+                    let c = self.pop_value()?.as_i32();
+                    self.store_bytes(32, arg, c as i64, module, store)?;
+                },
+
+                Instr::I32Store8(arg) => {
+                    let c = self.pop_value()?.as_i32();
+                    self.store_bytes(8, arg, c as i64, module, store)?;
+                },
+
+                Instr::I32Store16(arg) => {
+                    let c = self.pop_value()?.as_i32();
+                    self.store_bytes(16, arg, c as i64, module, store)?;
+                },
+
+                Instr::I64Store(arg) => {
+                    let c = self.pop_value()?.as_i64();
+                    self.store_bytes(64, arg, c, module, store)?;
+                },
+
+                Instr::I64Store8(arg) => {
+                    let c = self.pop_value()?.as_i64();
+                    self.store_bytes(8, arg, c, module, store)?;
+                },
+
+                Instr::I64Store16(arg) => {
+                    let c = self.pop_value()?.as_i64();
+                    self.store_bytes(16, arg, c, module, store)?;
+                },
+
+                Instr::I64Store32(arg) => {
+                    let c = self.pop_value()?.as_i64();
+                    self.store_bytes(32, arg, c, module, store)?;
+                },
+
+                Instr::F32Store(arg) => {
+                    let c = self.pop_value()?.as_f32();
+                    self.store_bytes(32, arg, c.to_bits() as i64, module, store)?;
+                },
+
+                Instr::F64Store(arg) => {
+                    let c = self.pop_value()?.as_f64();
+                    self.store_bytes(64, arg, c.to_bits() as i64, module, store)?;
+                },
+
                 _ => todo!()
             }
         }
@@ -669,6 +714,31 @@ impl Executor {
         bytes[..num_bytes].copy_from_slice(&mem.data[ea..ea + num_bytes]);
 
         Ok(bytes)
+    }
+
+    fn store_bytes(&mut self, n: usize, arg: &MemArg, c: i64, module: &Rc<ModuleInstance>, store: &mut Store) -> Result<(), ExecuteError> {
+        let a = *module.mem_addrs
+            .get(0)
+            .ok_or(ExecuteError::InvalidMemAddressIndex)?;
+
+        let mem = store.mems
+            .get_mut(a)
+            .expect("Memory instance should exist.");
+
+        let num_bytes = n / 8;
+        let i = self.pop_value()?.as_i32();
+
+        let ea = (i as u32).checked_add(arg.offset).ok_or(ExecuteError::Trapped)?;
+        let end = (ea as usize).checked_add(num_bytes).ok_or(ExecuteError::Trapped)?;
+
+        if end > mem.data.len() {
+            return Err(ExecuteError::Trapped);
+        }
+        
+        let bytes = c.to_le_bytes();
+        mem.data[ea as usize..end].copy_from_slice(&bytes[..num_bytes]);
+
+        Ok(())
     }
     
     /// Returns the arity of the given `BlockType`.
