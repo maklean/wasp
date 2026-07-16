@@ -1,6 +1,8 @@
 use std::rc::Rc;
 use crate::{definitions::{Func, FuncType, Mutability, ValType}, errors::ExecuteError, instructions::{BlockType, Instr, MemArg}};
 
+pub const PAGE_SIZE: usize = 65536;
+
 /// Runtime representation of a Wasm value.
 #[derive(Debug, Clone, Copy)]
 pub enum Val {
@@ -575,6 +577,43 @@ impl Executor {
                     let c = self.pop_value()?.as_f64();
                     self.store_bytes(64, arg, c.to_bits() as i64, module, store)?;
                 },
+
+                Instr::MemorySize => {
+                    let a = *module.mem_addrs
+                        .get(0)
+                        .ok_or(ExecuteError::InvalidMemAddressIndex)?;
+
+                    let mem = store.mems
+                        .get(a)
+                        .expect("Memory instance should exist.");
+
+                    let size = mem.data.len() / PAGE_SIZE;
+                    self.push_value(Val::I32(size as i32));
+                },
+
+                Instr::MemoryGrow => {
+                    let a = *module.mem_addrs
+                        .get(0)
+                        .ok_or(ExecuteError::InvalidMemAddressIndex)?;
+
+                    let mem = store.mems
+                        .get_mut(a)
+                        .expect("Memory instance should exist.");
+
+                    let mem_max_size = mem.max.unwrap_or(u32::MAX) as usize;
+
+                    let old_size = mem.data.len() / PAGE_SIZE;
+
+                    let n = self.pop_value()?.as_i32();
+                    let new_size = old_size.checked_add(n as usize).ok_or(ExecuteError::Trapped)?;
+
+                    if new_size <= mem_max_size {
+                        mem.data.resize(new_size, 0);
+                        self.push_value(Val::I32(old_size as i32));
+                    } else {
+                        self.push_value(Val::I32(-1));
+                    }
+                }
 
                 _ => todo!()
             }
