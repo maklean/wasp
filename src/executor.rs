@@ -716,6 +716,7 @@ impl Executor {
         Ok(bytes)
     }
 
+    /// Stores `N` bits into the only defined memory instance from a 8-byte constant `c`.
     fn store_bytes(&mut self, n: usize, arg: &MemArg, c: i64, module: &Rc<ModuleInstance>, store: &mut Store) -> Result<(), ExecuteError> {
         let a = *module.mem_addrs
             .get(0)
