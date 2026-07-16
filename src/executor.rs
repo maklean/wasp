@@ -237,11 +237,6 @@ impl Executor {
                 Instr::Unreachable => return Err(ExecuteError::Trapped),
                 Instr::Nop => {},
 
-                Instr::I32Const(v) => self.push_value(Val::I32(*v)),
-                Instr::I64Const(v) => self.push_value(Val::I64(*v)),
-                Instr::F32Const(v) => self.push_value(Val::F32(*v)),
-                Instr::F64Const(v) => self.push_value(Val::F64(*v)),
-
                 Instr::Block(block_type, body) => {
                     let arity = Self::block_arity(*block_type);
                     let prev = self.enter_block(arity);
@@ -613,8 +608,164 @@ impl Executor {
                     } else {
                         self.push_value(Val::I32(-1));
                     }
-                }
+                },
 
+                // Numeric Instructions
+                Instr::I32Const(v) => self.push_value(Val::I32(*v)),
+                Instr::I64Const(v) => self.push_value(Val::I64(*v)),
+                Instr::F32Const(v) => self.push_value(Val::F32(*v)),
+                Instr::F64Const(v) => self.push_value(Val::F64(*v)),
+
+                Instr::I32Clz => self.unop_i32(|v| v.leading_zeros() as i32)?,
+                Instr::I32Ctz => self.unop_i32(|v| v.trailing_zeros() as i32)?,
+                Instr::I32Popcnt => self.unop_i32(|v| v.count_ones() as i32)?,
+
+                Instr::I32Add => self.binop_i32(|a, b| a.wrapping_add(b))?,
+                Instr::I32Sub => self.binop_i32(|a, b| a.wrapping_sub(b))?,
+                Instr::I32Mul => self.binop_i32(|a, b| a.wrapping_mul(b))?,
+
+                Instr::I32DivS => self.binop_i32_trap(|a, b| {
+                    if b == 0 { return Err(ExecuteError::Trapped); }
+                    if a == i32::MIN && b == -1 { return Err(ExecuteError::Trapped); }
+                    Ok(a.wrapping_div(b))
+                })?,
+                Instr::I32DivU => self.binop_i32_trap(|a, b| {
+                    let (a, b) = (a as u32, b as u32);
+                    if b == 0 { return Err(ExecuteError::Trapped); }
+                    Ok((a / b) as i32)
+                })?,
+                Instr::I32RemS => self.binop_i32_trap(|a, b| {
+                    if b == 0 { return Err(ExecuteError::Trapped); }
+                    if a == i32::MIN && b == -1 { return Ok(0); }
+                    Ok(a.wrapping_rem(b))
+                })?,
+                Instr::I32RemU => self.binop_i32_trap(|a, b| {
+                    let (a, b) = (a as u32, b as u32);
+                    if b == 0 { return Err(ExecuteError::Trapped); }
+                    Ok((a % b) as i32)
+                })?,
+
+                Instr::I32And => self.binop_i32(|a, b| a & b)?,
+                Instr::I32Or => self.binop_i32(|a, b| a | b)?,
+                Instr::I32Xor => self.binop_i32(|a, b| a ^ b)?,
+                Instr::I32Shl => self.binop_i32(|a, b| a.wrapping_shl((b as u32) & 31))?,
+                Instr::I32ShrS => self.binop_i32(|a, b| a.wrapping_shr((b as u32) & 31))?,
+                Instr::I32ShrU => self.binop_i32(|a, b| ((a as u32).wrapping_shr((b as u32) & 31)) as i32)?,
+                Instr::I32Rotl => self.binop_i32(|a, b| a.rotate_left((b as u32) & 31))?,
+                Instr::I32Rotr => self.binop_i32(|a, b| a.rotate_right((b as u32) & 31))?,
+
+                Instr::I32Eqz => self.testop_i32(|c| c == 0)?,
+                Instr::I32Eq => self.relop_i32(|a, b| a == b)?,
+                Instr::I32Ne => self.relop_i32(|a, b| a != b)?,
+                Instr::I32LtS => self.relop_i32(|a, b| a < b)?,
+                Instr::I32LtU => self.relop_i32(|a, b| (a as u32) < (b as u32))?,
+                Instr::I32GtS => self.relop_i32(|a, b| a > b)?,
+                Instr::I32GtU => self.relop_i32(|a, b| (a as u32) > (b as u32))?,
+                Instr::I32LeS => self.relop_i32(|a, b| a <= b)?,
+                Instr::I32LeU => self.relop_i32(|a, b| (a as u32) <= (b as u32))?,
+                Instr::I32GeS => self.relop_i32(|a, b| a >= b)?,
+                Instr::I32GeU => self.relop_i32(|a, b| (a as u32) >= (b as u32))?,
+
+                Instr::I64Clz => self.unop_i64(|v| v.leading_zeros() as i64)?,
+                Instr::I64Ctz => self.unop_i64(|v| v.trailing_zeros() as i64)?,
+                Instr::I64Popcnt => self.unop_i64(|v| v.count_ones() as i64)?,
+
+                Instr::I64Add => self.binop_i64(|a, b| a.wrapping_add(b))?,
+                Instr::I64Sub => self.binop_i64(|a, b| a.wrapping_sub(b))?,
+                Instr::I64Mul => self.binop_i64(|a, b| a.wrapping_mul(b))?,
+
+                Instr::I64DivS => self.binop_i64_trap(|a, b| {
+                    if b == 0 { return Err(ExecuteError::Trapped); }
+                    if a == i64::MIN && b == -1 { return Err(ExecuteError::Trapped); }
+                    Ok(a.wrapping_div(b))
+                })?,
+                Instr::I64DivU => self.binop_i64_trap(|a, b| {
+                    let (a, b) = (a as u64, b as u64);
+                    if b == 0 { return Err(ExecuteError::Trapped); }
+                    Ok((a / b) as i64)
+                })?,
+                Instr::I64RemS => self.binop_i64_trap(|a, b| {
+                    if b == 0 { return Err(ExecuteError::Trapped); }
+                    if a == i64::MIN && b == -1 { return Ok(0); }
+                    Ok(a.wrapping_rem(b))
+                })?,
+                Instr::I64RemU => self.binop_i64_trap(|a, b| {
+                    let (a, b) = (a as u64, b as u64);
+                    if b == 0 { return Err(ExecuteError::Trapped); }
+                    Ok((a % b) as i64)
+                })?,
+
+                Instr::I64And => self.binop_i64(|a, b| a & b)?,
+                Instr::I64Or => self.binop_i64(|a, b| a | b)?,
+                Instr::I64Xor => self.binop_i64(|a, b| a ^ b)?,
+                Instr::I64Shl => self.binop_i64(|a, b| a.wrapping_shl((b as u32) & 63))?,
+                Instr::I64ShrS => self.binop_i64(|a, b| a.wrapping_shr((b as u32) & 63))?,
+                Instr::I64ShrU => self.binop_i64(|a, b| ((a as u64).wrapping_shr((b as u32) & 63)) as i64)?,
+                Instr::I64Rotl => self.binop_i64(|a, b| a.rotate_left((b as u32) & 63))?,
+                Instr::I64Rotr => self.binop_i64(|a, b| a.rotate_right((b as u32) & 63))?,
+
+                Instr::I64Eqz => self.testop_i64(|c| c == 0)?,
+                Instr::I64Eq => self.relop_i64(|a, b| a == b)?,
+                Instr::I64Ne => self.relop_i64(|a, b| a != b)?,
+                Instr::I64LtS => self.relop_i64(|a, b| a < b)?,
+                Instr::I64LtU => self.relop_i64(|a, b| (a as u64) < (b as u64))?,
+                Instr::I64GtS => self.relop_i64(|a, b| a > b)?,
+                Instr::I64GtU => self.relop_i64(|a, b| (a as u64) > (b as u64))?,
+                Instr::I64LeS => self.relop_i64(|a, b| a <= b)?,
+                Instr::I64LeU => self.relop_i64(|a, b| (a as u64) <= (b as u64))?,
+                Instr::I64GeS => self.relop_i64(|a, b| a >= b)?,
+                Instr::I64GeU => self.relop_i64(|a, b| (a as u64) >= (b as u64))?,
+
+                Instr::F32Abs => self.unop_f32(|v| v.abs())?,
+                Instr::F32Neg => self.unop_f32(|v| -v)?,
+                Instr::F32Sqrt => self.unop_f32(|v| v.sqrt())?,
+                Instr::F32Ceil => self.unop_f32(|v| v.ceil())?,
+                Instr::F32Floor => self.unop_f32(|v| v.floor())?,
+                Instr::F32Trunc => self.unop_f32(|v| v.trunc())?,
+                Instr::F32Nearest => self.unop_f32(|v| v.round_ties_even())?,
+                Instr::F32Add => self.binop_f32(|a, b| a + b)?,
+                Instr::F32Sub => self.binop_f32(|a, b| a - b)?,
+                Instr::F32Mul => self.binop_f32(|a, b| a * b)?,
+                Instr::F32Div => self.binop_f32(|a, b| a / b)?,
+                Instr::F32Min => self.binop_f32(|a, b| {
+                    if a.is_nan() || b.is_nan() { f32::NAN } else { a.min(b) }
+                })?,
+                Instr::F32Max => self.binop_f32(|a, b| {
+                    if a.is_nan() || b.is_nan() { f32::NAN } else { a.max(b) }
+                })?,
+                Instr::F32Copysign => self.binop_f32(|a, b| a.copysign(b))?,
+                Instr::F32Eq => self.relop_f32(|a, b| a == b)?,
+                Instr::F32Ne => self.relop_f32(|a, b| a != b)?,
+                Instr::F32Lt => self.relop_f32(|a, b| a < b)?,
+                Instr::F32Gt => self.relop_f32(|a, b| a > b)?,
+                Instr::F32Le => self.relop_f32(|a, b| a <= b)?,
+                Instr::F32Ge => self.relop_f32(|a, b| a >= b)?,
+
+                Instr::F64Abs => self.unop_f64(|v| v.abs())?,
+                Instr::F64Neg => self.unop_f64(|v| -v)?,
+                Instr::F64Sqrt => self.unop_f64(|v| v.sqrt())?,
+                Instr::F64Ceil => self.unop_f64(|v| v.ceil())?,
+                Instr::F64Floor => self.unop_f64(|v| v.floor())?,
+                Instr::F64Trunc => self.unop_f64(|v| v.trunc())?,
+                Instr::F64Nearest => self.unop_f64(|v| v.round_ties_even())?,
+                Instr::F64Add => self.binop_f64(|a, b| a + b)?,
+                Instr::F64Sub => self.binop_f64(|a, b| a - b)?,
+                Instr::F64Mul => self.binop_f64(|a, b| a * b)?,
+                Instr::F64Div => self.binop_f64(|a, b| a / b)?,
+                Instr::F64Min => self.binop_f64(|a, b| {
+                    if a.is_nan() || b.is_nan() { f64::NAN } else { a.min(b) }
+                })?,
+                Instr::F64Max => self.binop_f64(|a, b| {
+                    if a.is_nan() || b.is_nan() { f64::NAN } else { a.max(b) }
+                })?,
+                Instr::F64Copysign => self.binop_f64(|a, b| a.copysign(b))?,
+                Instr::F64Eq => self.relop_f64(|a, b| a == b)?,
+                Instr::F64Ne => self.relop_f64(|a, b| a != b)?,
+                Instr::F64Lt => self.relop_f64(|a, b| a < b)?,
+                Instr::F64Gt => self.relop_f64(|a, b| a > b)?,
+                Instr::F64Le => self.relop_f64(|a, b| a <= b)?,
+                Instr::F64Ge => self.relop_f64(|a, b| a >= b)?,
+                
                 _ => todo!()
             }
         }
@@ -778,6 +929,160 @@ impl Executor {
         let bytes = c.to_le_bytes();
         mem.data[ea as usize..end].copy_from_slice(&bytes[..num_bytes]);
 
+        Ok(())
+    }
+
+    fn unop_i32<F>(&mut self, f: F) -> Result<(), ExecuteError>
+    where
+        F: FnOnce(i32) -> i32
+    {
+        let v = self.pop_value()?.as_i32();
+        self.push_value(Val::I32(f(v)));
+        Ok(())
+    }
+
+    fn unop_i64<F>(&mut self, f: F) -> Result<(), ExecuteError>
+    where
+        F: FnOnce(i64) -> i64
+    {
+        let v = self.pop_value()?.as_i64();
+        self.push_value(Val::I64(f(v)));
+        Ok(())
+    }
+
+    fn unop_f32<F>(&mut self, f: F) -> Result<(), ExecuteError>
+    where
+        F: FnOnce(f32) -> f32
+    {
+        let v = self.pop_value()?.as_f32();
+        self.push_value(Val::F32(f(v)));
+        Ok(())
+    }
+
+    fn unop_f64<F>(&mut self, f: F) -> Result<(), ExecuteError>
+    where
+        F: FnOnce(f64) -> f64
+    {
+        let v = self.pop_value()?.as_f64();
+        self.push_value(Val::F64(f(v)));
+        Ok(())
+    }
+
+    fn binop_i32<F>(&mut self, f: F) -> Result<(), ExecuteError>
+    where
+        F: FnOnce(i32, i32) -> i32
+    {
+        let c2 = self.pop_value()?.as_i32();
+        let c1 = self.pop_value()?.as_i32();
+        self.push_value(Val::I32(f(c1, c2)));
+        Ok(())
+    }
+
+    fn binop_i64<F>(&mut self, f: F) -> Result<(), ExecuteError>
+    where
+        F: FnOnce(i64, i64) -> i64
+    {
+        let c2 = self.pop_value()?.as_i64();
+        let c1 = self.pop_value()?.as_i64();
+        self.push_value(Val::I64(f(c1, c2)));
+        Ok(())
+    }
+
+    fn binop_f32<F>(&mut self, f: F) -> Result<(), ExecuteError>
+    where
+        F: FnOnce(f32, f32) -> f32
+    {
+        let c2 = self.pop_value()?.as_f32();
+        let c1 = self.pop_value()?.as_f32();
+        self.push_value(Val::F32(f(c1, c2)));
+        Ok(())
+    }
+
+    fn binop_f64<F>(&mut self, f: F) -> Result<(), ExecuteError>
+    where
+        F: FnOnce(f64, f64) -> f64
+    {
+        let c2 = self.pop_value()?.as_f64();
+        let c1 = self.pop_value()?.as_f64();
+        self.push_value(Val::F64(f(c1, c2)));
+        Ok(())
+    }
+
+    fn binop_i32_trap<F>(&mut self, f: F) -> Result<(), ExecuteError>
+    where
+        F: FnOnce(i32, i32) -> Result<i32, ExecuteError>
+    {
+        let c2 = self.pop_value()?.as_i32();
+        let c1 = self.pop_value()?.as_i32();
+        self.push_value(Val::I32(f(c1, c2)?));
+        Ok(())
+    }
+
+    fn binop_i64_trap<F>(&mut self, f: F) -> Result<(), ExecuteError>
+    where
+        F: FnOnce(i64, i64) -> Result<i64, ExecuteError>
+    {
+        let c2 = self.pop_value()?.as_i64();
+        let c1 = self.pop_value()?.as_i64();
+        self.push_value(Val::I64(f(c1, c2)?));
+        Ok(())
+    }
+
+    fn testop_i32<F>(&mut self, f: F) -> Result<(), ExecuteError>
+    where
+        F: FnOnce(i32) -> bool
+    {
+        let c = self.pop_value()?.as_i32();
+        self.push_value(Val::I32(if f(c) { 1 } else { 0 }));
+        Ok(())
+    }
+
+    fn testop_i64<F>(&mut self, f: F) -> Result<(), ExecuteError>
+    where
+        F: FnOnce(i64) -> bool
+    {
+        let c = self.pop_value()?.as_i64();
+        self.push_value(Val::I32(if f(c) { 1 } else { 0 }));
+        Ok(())
+    }
+
+    fn relop_i32<F>(&mut self, f: F) -> Result<(), ExecuteError>
+    where
+        F: FnOnce(i32, i32) -> bool
+    {
+        let c2 = self.pop_value()?.as_i32();
+        let c1 = self.pop_value()?.as_i32();
+        self.push_value(Val::I32(if f(c1, c2) { 1 } else { 0 }));
+        Ok(())
+    }
+
+    fn relop_i64<F>(&mut self, f: F) -> Result<(), ExecuteError>
+    where
+        F: FnOnce(i64, i64) -> bool
+    {
+        let c2 = self.pop_value()?.as_i64();
+        let c1 = self.pop_value()?.as_i64();
+        self.push_value(Val::I32(if f(c1, c2) { 1 } else { 0 }));
+        Ok(())
+    }
+
+    fn relop_f32<F>(&mut self, f: F) -> Result<(), ExecuteError>
+    where
+        F: FnOnce(f32, f32) -> bool
+    {
+        let c2 = self.pop_value()?.as_f32();
+        let c1 = self.pop_value()?.as_f32();
+        self.push_value(Val::I32(if f(c1, c2) { 1 } else { 0 }));
+        Ok(())
+    }
+
+    fn relop_f64<F>(&mut self, f: F) -> Result<(), ExecuteError>
+    where
+        F: FnOnce(f64, f64) -> bool
+    {
+        let c2 = self.pop_value()?.as_f64();
+        let c1 = self.pop_value()?.as_f64();
+        self.push_value(Val::I32(if f(c1, c2) { 1 } else { 0 }));
         Ok(())
     }
     
