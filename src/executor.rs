@@ -765,14 +765,91 @@ impl Executor {
                 Instr::F64Gt => self.relop_f64(|a, b| a > b)?,
                 Instr::F64Le => self.relop_f64(|a, b| a <= b)?,
                 Instr::F64Ge => self.relop_f64(|a, b| a >= b)?,
-                
-                _ => todo!()
+
+                Instr::I32WrapI64 => self.cvtop_from_i64(|v| Val::I32(v as i32))?,
+
+                Instr::I64ExtendI32U => self.cvtop_from_i32(|v| Val::I64(v as u32 as i64))?,
+                Instr::I64ExtendI32S => self.cvtop_from_i32(|v| Val::I64(v as i64))?,
+
+                Instr::I32TruncF32U => self.cvtop_from_f32_trap(|v| {
+                    if v.is_nan() || !(v > -1.0 && v < 4294967296.0) {
+                        return Err(ExecuteError::Trapped);
+                    }
+
+                    Ok(Val::I32(v.trunc() as u32 as i32))
+                })?,
+                Instr::I32TruncF32S => self.cvtop_from_f32_trap(|v| {
+                    if v.is_nan() || !(v >= -2147483648.0 && v < 2147483648.0) {
+                        return Err(ExecuteError::Trapped);
+                    }
+
+                    Ok(Val::I32(v.trunc() as i32))
+                })?,
+                Instr::I64TruncF32U => self.cvtop_from_f32_trap(|v| {
+                    if v.is_nan() || !(v > -1.0 && v < 18446744073709551616.0) {
+                        return Err(ExecuteError::Trapped);
+                    }
+
+                    Ok(Val::I64(v.trunc() as u64 as i64))
+                })?,
+                Instr::I64TruncF32S => self.cvtop_from_f32_trap(|v| {
+                    if v.is_nan() || !(v >= -9223372036854775808.0 && v < 9223372036854775808.0) {
+                        return Err(ExecuteError::Trapped);
+                    }
+
+                    Ok(Val::I64(v.trunc() as i64))
+                })?,
+                Instr::I32TruncF64U => self.cvtop_from_f64_trap(|v| {
+                    if v.is_nan() || !(v > -1.0 && v < 4294967296.0) {
+                        return Err(ExecuteError::Trapped);
+                    }
+
+                    Ok(Val::I32(v.trunc() as u32 as i32))
+                })?,
+                Instr::I32TruncF64S => self.cvtop_from_f64_trap(|v| {
+                    if v.is_nan() || !(v >= -2147483648.0 && v < 2147483648.0) {
+                        return Err(ExecuteError::Trapped);
+                    }
+
+                    Ok(Val::I32(v.trunc() as i32))
+                })?,
+                Instr::I64TruncF64U => self.cvtop_from_f64_trap(|v| {
+                    if v.is_nan() || !(v > -1.0 && v < 18446744073709551616.0) {
+                        return Err(ExecuteError::Trapped);
+                    }
+
+                    Ok(Val::I64(v.trunc() as u64 as i64))
+                })?,
+                Instr::I64TruncF64S => self.cvtop_from_f64_trap(|v| {
+                    if v.is_nan() || !(v >= -9223372036854775808.0 && v < 9223372036854775808.0) {
+                        return Err(ExecuteError::Trapped);
+                    }
+
+                    Ok(Val::I64(v.trunc() as i64))
+                })?,
+
+                Instr::F32ConvertI32U => self.cvtop_from_i32(|v| Val::F32(v as u32 as f32))?,
+                Instr::F32ConvertI32S => self.cvtop_from_i32(|v| Val::F32(v as f32))?,
+                Instr::F64ConvertI32U => self.cvtop_from_i32(|v| Val::F64(v as u32 as f64))?,
+                Instr::F64ConvertI32S => self.cvtop_from_i32(|v| Val::F64(v as f64))?,
+                Instr::F32ConvertI64U => self.cvtop_from_i64(|v| Val::F32(v as u64 as f32))?,
+                Instr::F32ConvertI64S => self.cvtop_from_i64(|v| Val::F32(v as f32))?,
+                Instr::F64ConvertI64U => self.cvtop_from_i64(|v| Val::F64(v as u64 as f64))?,
+                Instr::F64ConvertI64S => self.cvtop_from_i64(|v| Val::F64(v as f64))?,
+
+                Instr::F32DemoteF64 => self.cvtop_from_f64(|v| Val::F32(v as f32))?,
+                Instr::F64PromoteF32 => self.cvtop_from_f32(|v| Val::F64(v as f64))?,
+
+                Instr::I32ReinterpretF32 => self.cvtop_from_f32(|v| Val::I32(v.to_bits() as i32))?,
+                Instr::I64ReinterpretF64 => self.cvtop_from_f64(|v| Val::I64(v.to_bits() as i64))?,
+                Instr::F32ReinterpretI32 => self.cvtop_from_i32(|v| Val::F32(f32::from_bits(v as u32)))?,
+                Instr::F64ReinterpretI64 => self.cvtop_from_i64(|v| Val::F64(f64::from_bits(v as u64)))?,
             }
         }
 
         Ok(None)
     }
-
+    
     /// Pushes a value onto the value/operand stack.
     pub fn push_value(&mut self, v: Val) {
         self.values.push(v);
@@ -1083,6 +1160,60 @@ impl Executor {
         let c2 = self.pop_value()?.as_f64();
         let c1 = self.pop_value()?.as_f64();
         self.push_value(Val::I32(if f(c1, c2) { 1 } else { 0 }));
+        Ok(())
+    }
+
+    fn cvtop_from_i32<F>(&mut self, f: F) -> Result<(), ExecuteError>
+    where 
+        F: FnOnce(i32) -> Val
+    {
+        let v = self.pop_value()?.as_i32();
+        self.push_value(f(v));
+        Ok(())
+    }
+
+    fn cvtop_from_i64<F>(&mut self, f: F) -> Result<(), ExecuteError>
+    where 
+        F: FnOnce(i64) -> Val
+    {
+        let v = self.pop_value()?.as_i64();
+        self.push_value(f(v));
+        Ok(())
+    }
+
+    fn cvtop_from_f32<F>(&mut self, f: F) -> Result<(), ExecuteError>
+    where 
+        F: FnOnce(f32) -> Val
+    {
+        let v = self.pop_value()?.as_f32();
+        self.push_value(f(v));
+        Ok(())
+    }
+
+    fn cvtop_from_f32_trap<F>(&mut self, f: F) -> Result<(), ExecuteError>
+    where 
+        F: FnOnce(f32) -> Result<Val, ExecuteError>
+    {
+        let v = self.pop_value()?.as_f32();
+        self.push_value(f(v)?);
+        Ok(())
+    }
+
+    fn cvtop_from_f64<F>(&mut self, f: F) -> Result<(), ExecuteError>
+    where 
+        F: FnOnce(f64) -> Val
+    {
+        let v = self.pop_value()?.as_f64();
+        self.push_value(f(v));
+        Ok(())
+    }
+
+    fn cvtop_from_f64_trap<F>(&mut self, f: F) -> Result<(), ExecuteError>
+    where 
+        F: FnOnce(f64) -> Result<Val, ExecuteError>
+    {
+        let v = self.pop_value()?.as_f64();
+        self.push_value(f(v)?);
         Ok(())
     }
     

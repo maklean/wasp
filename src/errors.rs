@@ -67,6 +67,7 @@ pub enum ValidateError {
     DuplicateExportName { name: String }
 }
 
+#[derive(PartialEq, Eq, Debug)]
 pub enum ExecuteError {
     UnexpectedStackUnderflow,
     ExpectedValType { expect: ValType, actual: ValType },
