@@ -223,8 +223,8 @@ impl Executor {
             current_block: Block::default(),
         }
     }
-
-    pub fn execute(
+    
+    pub fn execute_instructions(
         &mut self, 
         instrs: &[Instr], 
         level: usize, 
@@ -242,7 +242,7 @@ impl Executor {
                     let prev = self.enter_block(arity);
 
                     // execute instructions in block with nested level
-                    let branch = self.execute(body, level + 1, store, module)?;
+                    let branch = self.execute_instructions(body, level + 1, store, module)?;
                 
                     // check if we're unwinding to a branch that's further up
                     let unwinding = branch.is_some_and(|target| target <= level);
@@ -263,7 +263,7 @@ impl Executor {
                     let current_level = level + 1;
 
                     loop {
-                        let return_level = self.execute(body, level + 1, store, module)?;
+                        let return_level = self.execute_instructions(body, level + 1, store, module)?;
 
                         if return_level == Some(current_level) {
                             continue;
@@ -287,9 +287,9 @@ impl Executor {
 
                     // execute block based on condition
                     let return_level = if condition != 0 {
-                        self.execute(then_block, level + 1, store, module)?
+                        self.execute_instructions(then_block, level + 1, store, module)?
                     } else {
-                        self.execute(else_block, level + 1, store, module)?
+                        self.execute_instructions(else_block, level + 1, store, module)?
                     };
 
                     let unwinding = return_level.is_some_and(|target| target <= level);
@@ -945,7 +945,7 @@ impl Executor {
                     self.locals.push(v);
                 }
 
-                self.execute(&code.body.instructions, 0, store, &module)?;
+                self.execute_instructions(&code.body.instructions, 0, store, &module)?;
             
                 self.exit_frame(prev_frame);
             }
