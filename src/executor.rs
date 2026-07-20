@@ -204,8 +204,19 @@ pub struct Block {
     pub values_start: usize,
 }
 
-/// Host function (leaving this for later)
-pub struct HostFunc;
+/// Host function
+pub struct HostFunc {
+    pub func: Box<dyn Fn(&mut Store, Vec<Val>) -> Result<Vec<Val>, ExecuteError>>,
+}
+
+impl HostFunc {
+    pub fn new<F>(f: F) -> Self
+    where
+        F: Fn(&mut Store, Vec<Val>) -> Result<Vec<Val>, ExecuteError> + 'static,
+    {
+        Self { func: Box::new(f) }
+    }
+}
 
 pub struct Executor {
     pub values: Vec<Val>,
@@ -931,8 +942,21 @@ impl Executor {
             .expect(&format!("Function at index {func_idx} should exist."));
         
         match func {
-            FuncInstance::Host { func_type: _, code: _ } => {
-                // TODO: implement host function calling
+            FuncInstance::Host { func_type , code } => {
+                let code = Rc::clone(code);
+
+                let arity = func_type.params.len();
+                
+                let mut params: Vec<Val> = Vec::with_capacity(arity);
+                for _ in 0..arity { params.push(self.pop_value()?); }
+
+                params.reverse();
+
+                let results = (code.func)(store, params)?;
+                
+                for v in results {
+                    self.push_value(v);
+                }
             },
 
             FuncInstance::Wasm { func_type, module, code } => {
