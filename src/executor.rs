@@ -240,11 +240,10 @@ impl ModuleInstance {
             })
             .collect();
 
+        let types = module.types.iter().map(|t| t.clone()).collect();
+        
         let this = Rc::new(ModuleInstance {
-            types: module.types.iter().map(|t| FuncType {
-                params: t.params.clone(),
-                results: t.results.clone(),
-            }).collect(),
+            types,
             func_addrs,
             table_addrs,
             mem_addrs,
