@@ -4,7 +4,7 @@ use crate::{decoder::Decoder, definitions::{Mutability, ValType}, errors::{Decod
 const END_MARKER: u8 = 0x0B;
 
 /// Wasm expression.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Expr {
     /// Sequence of instructions.
     pub instructions: Vec<Instr>,
@@ -90,6 +90,7 @@ impl Expr {
 }
 
 /// Wasm instructions.
+#[derive(Clone)]
 pub enum Instr {
     // Control Instructions
     Unreachable,

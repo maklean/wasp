@@ -1,5 +1,5 @@
 use std::rc::Rc;
-use crate::{definitions::{Func, FuncType, Mutability, ValType}, errors::ExecuteError, instructions::{BlockType, Instr, MemArg}};
+use crate::{definitions::{ExportDesc, Func, FuncType, Mutability, ValType}, errors::ExecuteError, instructions::{BlockType, Expr, Instr, MemArg}, module::Module};
 
 pub const PAGE_SIZE: usize = 65536;
 
@@ -86,6 +86,17 @@ pub struct Store {
     pub globals: Vec<GlobalInstance>,
 }
 
+impl Store {
+    pub fn new() -> Self {
+        Self { 
+            funcs: Vec::new(), 
+            tables: Vec::new(), 
+            mems: Vec::new(), 
+            globals: Vec::new() 
+        }
+    }
+}
+
 /// Runtime representation of a Wasm function.
 pub enum FuncInstance {
     /// A function defined inside a Wasm module.
@@ -156,6 +167,181 @@ pub struct ModuleInstance {
 
     /// Module's exports.
     pub exports: Vec<ExportInstance>,
+}
+
+impl ModuleInstance {
+    pub fn new(
+        module: &Module,
+        store: &mut Store,
+        imports: Vec<ExternVal>,
+    ) -> Result<Rc<Self>, ExecuteError> {
+        let mut imported_func_addrs = Vec::new();
+        let mut imported_table_addrs = Vec::new();
+        let mut imported_mem_addrs = Vec::new();
+        let mut imported_global_addrs = Vec::new();
+
+        for ext in &imports {
+            match ext {
+                ExternVal::Func(a) => imported_func_addrs.push(*a),
+                ExternVal::Table(a) => imported_table_addrs.push(*a),
+                ExternVal::Mem(a) => imported_mem_addrs.push(*a),
+                ExternVal::Global(a) => imported_global_addrs.push(*a),
+            }
+        }
+
+        // imported func addresses + module-defined function addresses
+        let func_addrs: Vec<Addr> = imported_func_addrs
+            .into_iter()
+            .chain(
+                (store.funcs.len()..store.funcs.len() + module.funcs.len())
+                    .collect::<Vec<Addr>>()
+            )
+            .collect();
+            
+        // imported table addresses + module-defined table addresses
+        let table_addrs: Vec<Addr> = imported_table_addrs
+            .into_iter()
+            .chain(
+                (store.tables.len()..store.tables.len() + module.tables.len())
+                    .collect::<Vec<Addr>>()
+            )
+            .collect();
+            
+        // imported mem addresses + module-defined mem addresses
+        let mem_addrs: Vec<Addr> = imported_mem_addrs
+            .into_iter()
+            .chain(
+                (store.mems.len()..store.mems.len() + module.mems.len())
+                    .collect::<Vec<Addr>>()
+            )
+            .collect();
+    
+        // imported global addresses + module-defined global addresses
+        let global_addrs: Vec<Addr> = imported_global_addrs
+            .iter()
+            .copied()
+            .chain(
+                (store.globals.len()..store.globals.len() + module.globals.len())
+                    .collect::<Vec<Addr>>()
+            )
+            .collect();
+            
+        let exports: Vec<ExportInstance> = module.exports
+            .iter()
+            .map(|export| {
+                let value = match export.desc {
+                    ExportDesc::Func(idx) => ExternVal::Func(func_addrs[idx as usize]),
+                    ExportDesc::Table(idx) => ExternVal::Table(table_addrs[idx as usize]),
+                    ExportDesc::Mem(idx) => ExternVal::Mem(mem_addrs[idx as usize]),
+                    ExportDesc::Global(idx) => ExternVal::Global(global_addrs[idx as usize]),
+                };
+
+                ExportInstance { name: export.name.clone(), value }
+            })
+            .collect();
+
+        let this = Rc::new(ModuleInstance {
+            types: module.types.iter().map(|t| FuncType {
+                params: t.params.clone(),
+                results: t.results.clone(),
+            }).collect(),
+            func_addrs,
+            table_addrs,
+            mem_addrs,
+            global_addrs,
+            exports,
+        });
+
+        // add module-defined function instances to the store
+        for func in &module.funcs  {
+            let func_type = Rc::new(this.types[func.type_idx as usize].clone());
+            let code = Rc::new(Func {
+                type_idx: func.type_idx,
+                locals: func.locals.clone(),
+                body: func.body.clone()
+            });
+
+            store.funcs.push(FuncInstance::Wasm { 
+                func_type, 
+                module: Rc::clone(&this), code 
+            });
+        }
+
+        // add module-defined tables to the store
+        for table in &module.tables {
+            store.tables.push(TableInstance { 
+                elem: vec![None; table.table_type.limits.min as usize], 
+                max: table.table_type.limits.max 
+            });
+        }
+
+        // add module-defined mems to the store
+        for mem in &module.mems {
+            store.mems.push(MemInstance { 
+                data: vec![0u8; mem.mem_type.min as usize * PAGE_SIZE], 
+                max: mem.mem_type.max 
+            });
+        }
+
+        // add module-defined globals to store
+        for global in &module.globals {
+            store.globals.push(GlobalInstance { 
+                value: Executor::execute_const_expr(&global.init, store, &imported_global_addrs), 
+                mutability: global.global_type.mutability 
+            });
+        }
+
+        // initialize element segments
+        for elem in &module.elem {
+            let offset = Executor::execute_const_expr(&elem.offset, store, &imported_global_addrs)
+                .as_i32();
+            let offset = usize::try_from(offset).map_err(|_| ExecuteError::Trapped)?;
+            
+            let table_addr = this.table_addrs[elem.table_idx as usize];
+            let table = &mut store.tables[table_addr];
+
+            // check if segment fits in table
+            let end = offset.checked_add(elem.init.len()).ok_or(ExecuteError::Trapped)?;
+            if end > table.elem.len() {
+                return Err(ExecuteError::Trapped);
+            }
+
+            // write indices into table
+            for (i, func_idx) in elem.init.iter().enumerate() {
+                let func_addr = this.func_addrs[*func_idx as usize];
+                table.elem[offset+i] = Some(func_addr);
+            }
+        }
+
+        // intialize data segments
+        for data in &module.data {
+            let offset = Executor::execute_const_expr(&data.offset, store, &imported_global_addrs)
+                .as_i32();
+            let offset = usize::try_from(offset).map_err(|_| ExecuteError::Trapped)?;
+
+            let mem_addr = this.mem_addrs[data.mem_idx as usize];
+            let mem = &mut store.mems[mem_addr];
+
+            // check if bytes fit in memory
+            let end = offset.checked_add(data.init.len()).ok_or(ExecuteError::Trapped)?;
+            if end > mem.data.len() {
+                return Err(ExecuteError::Trapped);
+            }
+
+            // add bytes to memory
+            mem.data[offset..end].copy_from_slice(&data.init);
+        }
+
+        // run start function if present
+        if let Some(start_idx) = module.start {
+            let start_addr = this.func_addrs[start_idx as usize];
+            let mut executor = Executor::new();
+
+            executor.call_function(start_addr, store)?;
+        }
+
+        Ok(this)
+    }
 }
 
 /// Runtime representation of a Wasm export.
@@ -232,6 +418,20 @@ impl Executor {
             locals: Vec::new(),
             current_frame: Frame::default(),
             current_block: Block::default(),
+        }
+    }
+
+    pub fn execute_const_expr(expr: &Expr, store: &Store, imported_global_addrs: &[Addr]) -> Val {
+        match &expr.instructions[0] {
+            Instr::I32Const(v) => Val::I32(*v),
+            Instr::I64Const(v) => Val::I64(*v),
+            Instr::F32Const(v) => Val::F32(*v),
+            Instr::F64Const(v) => Val::F64(*v),
+            Instr::GlobalGet(idx) => {
+                let addr = imported_global_addrs[*idx as usize];
+                store.globals[addr].value
+            }
+            _ => unreachable!("Expression should be constant."),
         }
     }
     
@@ -936,7 +1136,7 @@ impl Executor {
     }
 
     /// Calls the function at the given index.
-    fn call_function(&mut self, func_idx: usize, store: &mut Store) -> Result<(), ExecuteError> {
+    pub fn call_function(&mut self, func_idx: usize, store: &mut Store) -> Result<(), ExecuteError> {
         let func = store.funcs
             .get(func_idx)
             .expect(&format!("Function at index {func_idx} should exist."));
