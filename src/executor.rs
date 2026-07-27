@@ -586,9 +586,9 @@ impl Executor {
                     }
                 },
 
-                Instr::Loop(_block_type, body) => {
-                    // arity for loops is always 0
-                    let prev = self.enter_block(0);
+                Instr::Loop(block_type, body) => {
+                    let arity = Self::block_arity(*block_type);
+                    let prev = self.enter_block(arity);
                     let current_level = level + 1;
 
                     loop {
