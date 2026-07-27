@@ -39,8 +39,12 @@ fn convert_wast_to_json(wast_path: &Path, output_dir: &Path) {
         .arg(wast_path)
         .arg("-o")
         .arg(&output_json)
-        .arg("--disable-reference-types")
+        .arg("--disable-saturating-float-to-int")
+        .arg("--disable-sign-extension")
+        .arg("--disable-simd")
+        .arg("--disable-multi-value")
         .arg("--disable-bulk-memory")
+        .arg("--disable-reference-types")
         .status()
         .expect("Failed to execute wast2json. Is wabt installed?");
 
