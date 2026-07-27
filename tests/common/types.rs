@@ -84,8 +84,20 @@ impl TryInto<Val> for ArgVal {
         match self.ty.as_str() {
             "i32" => Ok(Val::I32(self.value.parse::<u32>().unwrap() as i32)),
             "i64" => Ok(Val::I64(self.value.parse::<u64>().unwrap() as i64)),
-            "f32" => Ok(Val::F32(f32::from_bits(self.value.parse::<u32>().unwrap()))),
-            "f64" => Ok(Val::F64(f64::from_bits(self.value.parse::<u64>().unwrap()))),
+            "f32" => {
+                if self.value.starts_with("nan:") {
+                    Ok(Val::F32(f32::NAN))
+                } else {
+                    Ok(Val::F32(f32::from_bits(self.value.parse::<u32>().unwrap())))
+                }
+            },
+            "f64" => {
+                if self.value.starts_with("nan:") {
+                    Ok(Val::F64(f64::NAN))
+                } else {
+                    Ok(Val::F64(f64::from_bits(self.value.parse::<u64>().unwrap())))
+                }
+            },
             _ => panic!("unsupported arg value type {}", self.ty.as_str())
         }
     }
