@@ -1,6 +1,6 @@
-use std::{fs, path::Path};
+use std::{fs, path::Path, rc::Rc};
 
-use wasp::{module::Module, validator::Validator};
+use wasp::{executor::{ModuleInstance, Store}, module::Module, validator::Validator};
 
 use crate::common::{Command, Manifest};
 
@@ -12,6 +12,9 @@ fn run_spec_test(manifest_path: &Path) {
     let text = fs::read_to_string(manifest_path).unwrap();
 
     let manifest: Manifest = serde_json::from_str(&text).unwrap();
+
+    let mut store = Store::new();
+    let mut current_instance: Option<Rc<ModuleInstance>> = None;
     
     for cmd in &manifest.commands {
         match cmd {
@@ -24,6 +27,11 @@ fn run_spec_test(manifest_path: &Path) {
 
                 Validator::validate(&module)
                     .unwrap_or_else(|e| panic!("line {line}: failed to validate {filename}: {e:?}"));
+
+                let instance = ModuleInstance::new(&module, &mut store, Vec::new())
+                    .unwrap_or_else(|e| panic!("line {line}: failed to instantiate {filename}: {e:?}"));
+
+                current_instance = Some(instance);
             },
             _ => {}
         }

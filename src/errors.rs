@@ -76,7 +76,7 @@ pub enum ExecuteError {
     InvalidFuncIndex,
     InvalidGlobalIndex,
     InvalidMemAddressIndex,
-    ImportCountMismatch,
+    ImportCountMismatch { module_count: usize, embedder_count: usize },
     ImportTypeMismatch,
 }
 

@@ -348,7 +348,7 @@ impl ModuleInstance {
     /// Verifies the imports passed by the embedder against `module.imports`.
     fn check_imports(module: &Module, store: &Store, imports: &[ExternVal]) -> Result<(), ExecuteError> {
         if module.imports.len() != imports.len() {
-            return Err(ExecuteError::ImportCountMismatch);
+            return Err(ExecuteError::ImportCountMismatch { module_count: module.imports.len(), embedder_count: imports.len() });
         }
 
         for (module_import, embedder_import) in module.imports.iter().zip(imports.iter()) {
