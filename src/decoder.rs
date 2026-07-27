@@ -170,7 +170,10 @@ impl<'a> Decoder<'a> {
 
                 // sign extend if it's negative
                 if b & 0x40 != 0 {
-                    n += !0i64 << (bits_read + 7);
+                    let shift = bits_read + 7;
+                    if shift < 64 {
+                        n += !0i64 << shift;
+                    }
                 }
 
                 break;
