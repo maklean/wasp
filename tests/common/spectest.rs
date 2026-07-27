@@ -112,42 +112,45 @@ pub fn register_spectest(store: &mut Store) -> SpecTestExports {
 }
 
 /// Returns the imports required from the spectest module (also uses the current registered modules as fallback).
-pub fn spectest_imports(module: &Module, spectest_exports: &SpecTestExports, registered_modules: &HashMap<String, Rc<ModuleInstance>>, filename: &String, line: &u32) -> Vec<ExternVal> {
+pub fn spectest_imports(
+    module: &Module,
+    spectest_exports: &SpecTestExports,
+    registered_modules: &HashMap<String, Rc<ModuleInstance>>,
+    filename: &String,
+    line: &u32,
+) -> Result<Vec<ExternVal>, String> {
     module.imports
         .iter()
         .map(|import| {
             if import.module == "spectest" {
                 match import.name.as_str() {
-                    "global_i32" => ExternVal::Global(spectest_exports.global_i32),
-                    "global_i64" => ExternVal::Global(spectest_exports.global_i64),
-                    "global_f32" => ExternVal::Global(spectest_exports.global_f32),
-                    "global_f64" => ExternVal::Global(spectest_exports.global_f64),
-                    "memory" => ExternVal::Mem(spectest_exports.memory),
-                    "table" => ExternVal::Table(spectest_exports.table),
-                    "print" => ExternVal::Func(spectest_exports.print),
-                    "print_i32" => ExternVal::Func(spectest_exports.print_i32),
-                    "print_i64" => ExternVal::Func(spectest_exports.print_i64),
-                    "print_f32" => ExternVal::Func(spectest_exports.print_f32),
-                    "print_f64" => ExternVal::Func(spectest_exports.print_f64),
-                    "print_i32_f32" => ExternVal::Func(spectest_exports.print_i32_f32),
-                    "print_f64_f64" => ExternVal::Func(spectest_exports.print_f64_f64),
-                    other => panic!("line {line}: unhandled spectest import: {other} in {filename}."),
+                    "global_i32" => Ok(ExternVal::Global(spectest_exports.global_i32)),
+                    "global_i64" => Ok(ExternVal::Global(spectest_exports.global_i64)),
+                    "global_f32" => Ok(ExternVal::Global(spectest_exports.global_f32)),
+                    "global_f64" => Ok(ExternVal::Global(spectest_exports.global_f64)),
+                    "memory" => Ok(ExternVal::Mem(spectest_exports.memory)),
+                    "table" => Ok(ExternVal::Table(spectest_exports.table)),
+                    "print" => Ok(ExternVal::Func(spectest_exports.print)),
+                    "print_i32" => Ok(ExternVal::Func(spectest_exports.print_i32)),
+                    "print_i64" => Ok(ExternVal::Func(spectest_exports.print_i64)),
+                    "print_f32" => Ok(ExternVal::Func(spectest_exports.print_f32)),
+                    "print_f64" => Ok(ExternVal::Func(spectest_exports.print_f64)),
+                    "print_i32_f32" => Ok(ExternVal::Func(spectest_exports.print_i32_f32)),
+                    "print_f64_f64" => Ok(ExternVal::Func(spectest_exports.print_f64_f64)),
+                    other => Err(format!("line {line}: unhandled spectest import: {other} in {filename}.")),
                 }
             } else if let Some(registered_module) = registered_modules.get(&import.module) {
-                let export = registered_module.exports
+                registered_module.exports
                     .iter()
                     .find(|export| export.name == import.name)
-                    .unwrap_or_else(|| 
-                        panic!(
-                            "line {line}: export '{}' not found in registered module '{}' ({filename}).",
-                            import.name, import.module
-                        )
-                    );
-                
-                export.value
+                    .map(|export| export.value)
+                    .ok_or_else(|| format!(
+                        "line {line}: export '{}' not found in registered module '{}' ({filename}).",
+                        import.name, import.module
+                    ))
             } else {
-                panic!("line {line}: unknown import module: {} in {filename}.", import.module);
+                Err(format!("line {line}: unknown import module: {} in {filename}.", import.module))
             }
         })
-        .collect()
+        .collect() 
 }

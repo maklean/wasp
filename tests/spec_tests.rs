@@ -37,7 +37,8 @@ fn run_spec_test(manifest_path: &Path) {
                 Validator::validate(&module)
                     .unwrap_or_else(|e| panic!("line {line}: failed to validate {filename}: {e:?}"));
 
-                let instance = ModuleInstance::new(&module, &mut store, spectest_imports(&module, &spectest_exports, &registered_modules, filename, line))
+                let imports = spectest_imports(&module, &spectest_exports, &registered_modules, filename, line).unwrap();
+                let instance = ModuleInstance::new(&module, &mut store, imports)
                     .unwrap_or_else(|e| panic!("line {line}: failed to instantiate {filename}: {e:?}"));
 
                 if !name.is_empty() {
@@ -188,10 +189,10 @@ fn run_spec_test(manifest_path: &Path) {
                 Validator::validate(&module)
                     .unwrap_or_else(|e| panic!("line {line}: failed to validate {filename}: {e:?}"));
 
-                let imports = spectest_imports(&module, &spectest_exports, &registered_modules, filename, line);
+                let imports = spectest_imports(&module, &spectest_exports, &registered_modules, filename, line).unwrap();
                 let result = ModuleInstance::new(&module, &mut store, imports);
 
-                assert!(result.is_err(), "line {line}: expected module instantiation to fail, got success.");
+                assert!(result.is_err(), "line {line}: expected module instantiation (uninstantiable) to fail, got success.");
             },
 
             Command::AssertMalformed { line, filename, module_type } => {
@@ -217,7 +218,29 @@ fn run_spec_test(manifest_path: &Path) {
                 let result = Validator::validate(&module);
 
                 assert!(result.is_err(), "line {line}: expected module validation to fail, got success.");
-            }
+            },
+
+            Command::AssertUnlinkable { line, filename, module_type } => {
+                if module_type != "binary" { continue; }
+
+                let bytes = fs::read(dir.join(filename))
+                    .unwrap_or_else(|e| panic!("line {line}: failed to read {filename}: {e}"));
+                
+                let module = Module::decode(&bytes)
+                    .unwrap_or_else(|e| panic!("line {line}: failed to decode {filename}: {e:?}"));
+
+                Validator::validate(&module)
+                    .unwrap_or_else(|e| panic!("line {line}: failed to validate {filename}: {e:?}"));
+
+                // either the import lookup or module instantiation should fail
+                let result = spectest_imports(&module, &spectest_exports, &registered_modules, filename, line)
+                    .and_then(|imports| {
+                        ModuleInstance::new(&module, &mut store, imports)
+                            .map_err(|e| format!("{e:?}"))
+                    });
+
+                assert!(result.is_err(), "line {line}: expected module instantiation (unlinkable) to fail, got success.");
+            },
 
             _ => {}
         }

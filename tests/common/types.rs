@@ -51,6 +51,9 @@ pub enum Command {
     #[serde(rename = "assert_invalid")]
     AssertInvalid { line: u32, filename: String, module_type: String },
 
+    #[serde(rename = "assert_unlinkable")]
+    AssertUnlinkable { line: u32, filename: String, module_type: String },
+
     #[serde(other)]
     Other,
 }
