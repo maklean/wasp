@@ -248,7 +248,7 @@ impl<'a> Validator<'a> {
         let local = self.local_get(index)?;
 
         // types must be the same in order to set
-        if local != val_type {
+        if local != val_type && local != ValType::Unknown && val_type != ValType::Unknown {
             return Err(ValidateError::LocalSetTypeMismatch { expect: local, actual: val_type });
         }
 
