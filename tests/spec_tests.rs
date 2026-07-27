@@ -1,4 +1,4 @@
-use std::{fs, path::Path, rc::Rc};
+use std::{collections::HashMap, fs, path::Path, rc::Rc};
 
 use wasp::{executor::{ModuleInstance, Store}, module::Module, validator::Validator};
 
@@ -18,28 +18,44 @@ fn run_spec_test(manifest_path: &Path) {
 
     // add spectest module to store
     let spectest_exports = register_spectest(&mut store);
+
+    // map of all the seen modules throughout the spec test
+    let mut registered_modules: HashMap<String, Rc<ModuleInstance>> = HashMap::new();
     
     for cmd in &manifest.commands {
         match cmd {
-            Command::Module { filename, line } => {
+            Command::Module { filename, line, name } => {
                 let bytes = fs::read(dir.join(filename))
                     .unwrap_or_else(|e| panic!("line {line}: failed to read {filename}: {e}"));
                 
                 let module = Module::decode(&bytes)
                     .unwrap_or_else(|e| panic!("line {line}: failed to decode {filename}: {e:?}"));
 
-                for imp in &module.imports {
-                    println!("{:?}", imp)
-                }
-
                 Validator::validate(&module)
                     .unwrap_or_else(|e| panic!("line {line}: failed to validate {filename}: {e:?}"));
 
-                let instance = ModuleInstance::new(&module, &mut store, spectest_imports(&module, &spectest_exports, filename, line))
+                let instance = ModuleInstance::new(&module, &mut store, spectest_imports(&module, &spectest_exports, &registered_modules, filename, line))
                     .unwrap_or_else(|e| panic!("line {line}: failed to instantiate {filename}: {e:?}"));
+
+                if !name.is_empty() {
+                    registered_modules.insert(name.clone(), Rc::clone(&instance));
+                }
 
                 current_instance = Some(instance);
             },
+
+            Command::Register { line, name, as_ } => {
+                let instance = if name.is_empty() {
+                    current_instance.as_ref()
+                        .unwrap_or_else(|| panic!("line {line}: no current module to register"))
+                } else {
+                    registered_modules.get(name)
+                        .expect(&format!("line {line}: module '{name}' should be registered already."))
+                };
+
+                registered_modules.insert(as_.to_string(), Rc::clone(instance));
+            },
+
             _ => {}
         }
     }

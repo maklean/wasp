@@ -10,7 +10,25 @@ pub struct Manifest {
 #[serde(tag = "type")]
 pub enum Command {
     #[serde(rename = "module")]
-    Module { filename: String, line: u32 },
+    Module { 
+        filename: String, 
+        
+        line: u32,
+    
+        #[serde(default)]
+        name: String, 
+    },
+
+    #[serde(rename = "register")]
+    Register { 
+        line: u32, 
+        
+        #[serde(default)]
+        name: String, 
+        
+        #[serde(rename = "as")]
+        as_: String 
+    },
 
     #[serde(rename = "assert_return")]
     AssertReturn { action: Action, expected: Vec<ArgVal>, line: u32 },

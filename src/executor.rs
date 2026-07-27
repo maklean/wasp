@@ -441,6 +441,7 @@ pub type FuncElem = Option<Addr>;
 pub type Addr = usize;
 
 /// Wasm module export value.
+#[derive(Copy, Clone)]
 pub enum ExternVal {
     Func(Addr),
     Table(Addr),
