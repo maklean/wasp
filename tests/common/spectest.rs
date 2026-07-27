@@ -110,7 +110,31 @@ pub fn register_spectest(store: &mut Store) -> SpecTestExports {
     SpecTestExports { global_i32, global_i64, global_f32, global_f64, memory, table, print, print_i32, print_i64, print_f32, print_f64, print_i32_f32, print_f64_f64 }
 }
 
-/// Returns the required imports from the spectest module.
-pub fn spectest_imports(module: &Module, store: &Store) -> Vec<ExternVal> {
-    todo!()
+/// Returns the imports required from the spectest module.
+pub fn spectest_imports(module: &Module, spectest_exports: &SpecTestExports, filename: &String, line: &u32) -> Vec<ExternVal> {
+    module.imports
+        .iter()
+        .map(|import| {
+            if import.module != "spectest" {
+                panic!("line {line}: unknown import module: {} in {filename}.", import.module);
+            }
+
+            match import.name.as_str() {
+                "global_i32" => ExternVal::Global(spectest_exports.global_i32),
+                "global_i64" => ExternVal::Global(spectest_exports.global_i64),
+                "global_f32" => ExternVal::Global(spectest_exports.global_f32),
+                "global_f64" => ExternVal::Global(spectest_exports.global_f64),
+                "memory" => ExternVal::Mem(spectest_exports.memory),
+                "table" => ExternVal::Table(spectest_exports.table),
+                "print" => ExternVal::Func(spectest_exports.print),
+                "print_i32" => ExternVal::Func(spectest_exports.print_i32),
+                "print_i64" => ExternVal::Func(spectest_exports.print_i64),
+                "print_f32" => ExternVal::Func(spectest_exports.print_f32),
+                "print_f64" => ExternVal::Func(spectest_exports.print_f64),
+                "print_i32_f32" => ExternVal::Func(spectest_exports.print_i32_f32),
+                "print_f64_f64" => ExternVal::Func(spectest_exports.print_f64_f64),
+                other => panic!("line {line}: unhandled spectest import: {other} in {filename}."),
+            }
+        })
+        .collect()
 }

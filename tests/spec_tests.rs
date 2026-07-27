@@ -17,7 +17,7 @@ fn run_spec_test(manifest_path: &Path) {
     let mut current_instance: Option<Rc<ModuleInstance>> = None;
 
     // add spectest module to store
-    register_spectest(&mut store);
+    let spectest_exports = register_spectest(&mut store);
     
     for cmd in &manifest.commands {
         match cmd {
@@ -35,7 +35,7 @@ fn run_spec_test(manifest_path: &Path) {
                 Validator::validate(&module)
                     .unwrap_or_else(|e| panic!("line {line}: failed to validate {filename}: {e:?}"));
 
-                let instance = ModuleInstance::new(&module, &mut store, Vec::new())
+                let instance = ModuleInstance::new(&module, &mut store, spectest_imports(&module, &spectest_exports, filename, line))
                     .unwrap_or_else(|e| panic!("line {line}: failed to instantiate {filename}: {e:?}"));
 
                 current_instance = Some(instance);
