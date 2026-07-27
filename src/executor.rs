@@ -1355,8 +1355,6 @@ impl Executor {
                         self.locals.push(v);
                     }
 
-                    //println!("{:?}", code.body.instructions);
-
                     self.execute_instructions(&code.body.instructions, 0, store, &module)?;
                 
                     self.exit_frame(prev_frame);

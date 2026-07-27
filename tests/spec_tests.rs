@@ -45,8 +45,6 @@ fn run_spec_test(manifest_path: &Path) {
                     registered_modules.insert(name.clone(), Rc::clone(&instance));
                 }
 
-                println!("loaded {filename} (name={name:?}), exports: {:?}", instance.exports.iter().map(|e| (&e.name, &e.value)).collect::<Vec<_>>());
-
                 current_instance = Some(instance);
             },
 
@@ -245,8 +243,6 @@ fn run_spec_test(manifest_path: &Path) {
             _ => {}
         }
     }
-
-    println!();
 }
 
 /// Tests the entire WebAssembly 1.0 spec test suite.
@@ -264,8 +260,6 @@ fn run_spec_test_suite() {
                 let path = entry.unwrap().path();
 
                 if path.extension().map_or(false, |e| e == "json") {
-                    println!("running {}", path.display());
-
                     run_spec_test(&path);
                 }
             }
