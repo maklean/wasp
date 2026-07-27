@@ -296,12 +296,11 @@ impl ModuleInstance {
             });
         }
 
-        // initialize element segments
+        // check that element segments fit in the table before adding any
         for elem in &module.elem {
-            let offset = Executor::execute_const_expr(&elem.offset, store, &imported_global_addrs)
-                .as_i32();
+            let offset = Executor::execute_const_expr(&elem.offset, store, &imported_global_addrs).as_i32();
             let offset = usize::try_from(offset).map_err(|_| ExecuteError::Trapped)?;
-            
+
             let table_addr = this.table_addrs[elem.table_idx as usize];
             let table = &mut store.tables[table_addr];
 
@@ -310,18 +309,11 @@ impl ModuleInstance {
             if end > table.elem.len() {
                 return Err(ExecuteError::Trapped);
             }
-
-            // write indices into table
-            for (i, func_idx) in elem.init.iter().enumerate() {
-                let func_addr = this.func_addrs[*func_idx as usize];
-                table.elem[offset+i] = Some(func_addr);
-            }
         }
 
-        // intialize data segments
+        // check that all bytes fit in the memory before adding any
         for data in &module.data {
-            let offset = Executor::execute_const_expr(&data.offset, store, &imported_global_addrs)
-                .as_i32();
+            let offset = Executor::execute_const_expr(&data.offset, store, &imported_global_addrs).as_i32();
             let offset = usize::try_from(offset).map_err(|_| ExecuteError::Trapped)?;
 
             let mem_addr = this.mem_addrs[data.mem_idx as usize];
@@ -332,8 +324,30 @@ impl ModuleInstance {
             if end > mem.data.len() {
                 return Err(ExecuteError::Trapped);
             }
+        }
+
+        // initialize element segments
+        for elem in &module.elem {
+            let offset = Executor::execute_const_expr(&elem.offset, store, &imported_global_addrs).as_i32() as usize;
+            let table_addr = this.table_addrs[elem.table_idx as usize];
+            let table = &mut store.tables[table_addr];
+
+            // write indices into table
+            for (i, func_idx) in elem.init.iter().enumerate() {
+                let func_addr = this.func_addrs[*func_idx as usize];
+                table.elem[offset+i] = Some(func_addr);
+            }
+        }
+
+        // initialize data segments
+        for data in &module.data {
+            let offset = Executor::execute_const_expr(&data.offset, store, &imported_global_addrs).as_i32() as usize;
+
+            let mem_addr = this.mem_addrs[data.mem_idx as usize];
+            let mem = &mut store.mems[mem_addr];
 
             // add bytes to memory
+            let end = offset + data.init.len();
             mem.data[offset..end].copy_from_slice(&data.init);
         }
 
