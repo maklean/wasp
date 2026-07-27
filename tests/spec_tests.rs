@@ -152,6 +152,48 @@ fn run_spec_test(manifest_path: &Path) {
                 }
             },
 
+            Command::AssertTrap { action, line } => {
+                match action {
+                    Action::Invoke { module, field, args } => {
+                        let instance = resolve_module(module, &current_instance, &registered_modules, *line);
+
+                        let args: Vec<Val> = args
+                            .iter()
+                            .map(|arg_val| arg_val.clone().try_into().unwrap())
+                            .collect();
+
+                        let result = instance.invoke_export(&mut store, field, args);
+
+                        let Err(err) = result else {
+                            panic!("line {line}: expected '{field}' to trap.");
+                        };
+
+                        assert_eq!(
+                            err, ExecuteError::Trapped, 
+                            "line {line}: expected error to be trap error, got {err:?}"
+                        );
+                    },
+
+                    _ => unreachable!()
+                }
+            },
+
+            Command::AssertUninstantiable { line, filename } => {
+                let bytes = fs::read(dir.join(filename))
+                    .unwrap_or_else(|e| panic!("line {line}: failed to read {filename}: {e}"));
+                
+                let module = Module::decode(&bytes)
+                    .unwrap_or_else(|e| panic!("line {line}: failed to decode {filename}: {e:?}"));
+
+                Validator::validate(&module)
+                    .unwrap_or_else(|e| panic!("line {line}: failed to validate {filename}: {e:?}"));
+
+                let imports = spectest_imports(&module, &spectest_exports, &registered_modules, filename, line);
+                let result = ModuleInstance::new(&module, &mut store, imports);
+
+                assert!(result.is_err(), "line {line}: expected module instantiation to fail, got success.");
+            },
+
             _ => {}
         }
     }

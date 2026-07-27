@@ -41,6 +41,9 @@ pub enum Command {
 
     #[serde(rename = "assert_exhaustion")]
     AssertExhaustion { action: Action, line: u32 },
+    
+    #[serde(rename = "assert_uninstantiable")]
+    AssertUninstantiable { line: u32, filename: String },
 
     #[serde(other)]
     Other,
