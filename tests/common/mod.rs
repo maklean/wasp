@@ -1,5 +1,5 @@
-pub mod types;
-pub mod conversion;
+mod types;
+mod conversion;
 
 pub use types::{Manifest, Command, Action, ArgVal};
 pub use conversion::{SPEC_OUTPUT_DIR, convert_wasts};
