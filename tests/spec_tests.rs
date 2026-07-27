@@ -1,8 +1,8 @@
 use std::{collections::HashMap, fs, path::Path, rc::Rc};
 
-use wasp::{executor::{ModuleInstance, Store, Val}, module::Module, validator::Validator};
+use wasp::{executor::{ExternVal, ModuleInstance, Store, Val}, module::Module, validator::Validator};
 
-use crate::common::{Command, Manifest, register_spectest, spectest_imports, vals_match};
+use crate::common::{Action, Command, Manifest, register_spectest, resolve_module, spectest_imports, vals_match};
 
 mod common;
 
@@ -59,31 +59,51 @@ fn run_spec_test(manifest_path: &Path) {
             },
 
             Command::AssertReturn { action, expected, line } => {
-                let instance = match &action.module {
-                    Some(module) => registered_modules.get(module)
-                        .unwrap_or_else(|| panic!("line {line}: module '{module}' is not registered.")),
-
-                    None => current_instance.as_ref()
-                        .unwrap_or_else(|| panic!("line {line}: no module loaded"))
-                };
-                
-                let args: Vec<Val> = action.args
-                    .iter()
-                    .map(|arg_val| arg_val.clone().try_into().unwrap())
-                    .collect();
-
-                let actual_vals = instance.invoke_export(&mut store, &action.field, args)
-                    .unwrap_or_else(|e| panic!("line {line}: expected success, got {e:?}"));
-
                 let expected_vals: Vec<Val> = expected
                     .iter()
                     .map(|arg_val| arg_val.clone().try_into().unwrap())
                     .collect();
 
-                assert!(
-                    vals_match(&actual_vals, &expected_vals),
-                    "line {line}: expected {expected_vals:?}, got {actual_vals:?}"
-                )
+                match action {
+                    Action::Invoke { module, field, args } => {
+                        let instance = resolve_module(module, &current_instance, &registered_modules, *line);
+                    
+                        let args: Vec<Val> = args
+                            .iter()
+                            .map(|arg_val| arg_val.clone().try_into().unwrap())
+                            .collect();
+
+                        let actual_vals = instance.invoke_export(&mut store, field, args)
+                            .unwrap_or_else(|e| panic!("line {line}: expected success, got {e:?}"));
+
+                        
+
+                        assert!(
+                            vals_match(&actual_vals, &expected_vals),
+                            "line {line}: expected {expected_vals:?}, got {actual_vals:?}"
+                        )
+                    },
+
+                    Action::Get { module, field } => {
+                        let instance = resolve_module(module, &current_instance, &registered_modules, *line);
+
+                        let export = instance.exports
+                            .iter()
+                            .find(|e| e.name == *field)
+                            .unwrap_or_else(|| panic!("line {line}: export '{field}' not found"));
+
+                        let ExternVal::Global(global_addr) = export.value else {
+                            panic!("line {line}: export '{field}' is not a global");
+                        };
+
+                        let value = store.globals[global_addr].value;
+
+                        assert!(
+                            vals_match(&[value], &expected_vals),
+                            "line {line}: expected {expected_vals:?}, got [{value:?}]"
+                        );
+                    },
+                }
             },
 
             _ => {}

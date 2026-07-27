@@ -41,14 +41,26 @@ pub enum Command {
 }
 
 #[derive(Deserialize)]
-pub struct Action {
-    pub field: String,
+#[serde(tag = "type")]
+pub enum Action {
+    #[serde(rename = "invoke")]
+    Invoke {
+        #[serde(default)]
+        module: Option<String>,
 
-    #[serde(default)]
-    pub args: Vec<ArgVal>,
+        field: String,
 
-    #[serde(default)]
-    pub module: Option<String>,
+        #[serde(default)]
+        args: Vec<ArgVal>,
+    },
+
+    #[serde(rename = "get")]
+    Get {
+        #[serde(default)]
+        module: Option<String>,
+
+        field: String,
+    },
 }
 
 #[derive(Deserialize, Clone)]
