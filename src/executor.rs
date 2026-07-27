@@ -644,7 +644,7 @@ impl Executor {
                 Instr::BrTable(frame_indices, fallback) => {
                     let label_idx = self.pop_value()?.as_i32() as usize;
 
-                    if label_idx <= frame_indices.len() {
+                    if label_idx < frame_indices.len() {
                         let label = frame_indices
                             .get(label_idx)
                             .expect("label index should exist.");
