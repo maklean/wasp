@@ -1,10 +1,13 @@
 use std::{collections::HashMap, fs, path::Path, rc::Rc};
 
-use wasp::{executor::{ExternVal, ModuleInstance, Store, Val}, module::Module, validator::Validator};
+use wasp::{errors::ExecuteError, executor::{ExternVal, FuncInstance, ModuleInstance, Store, Val}, module::Module, validator::Validator};
 
 use crate::common::{Action, Command, Manifest, register_spectest, resolve_module, spectest_imports, vals_match};
 
 mod common;
+
+/// Stack size for spec tests (in MB).
+const STACK_SIZE_MB: usize = 256; 
 
 /// Runs a specific Wasm 1.0 spec test from its manifest/.json file.
 fn run_spec_test(manifest_path: &Path) {
@@ -76,8 +79,6 @@ fn run_spec_test(manifest_path: &Path) {
                         let actual_vals = instance.invoke_export(&mut store, field, args)
                             .unwrap_or_else(|e| panic!("line {line}: expected success, got {e:?}"));
 
-                        
-
                         assert!(
                             vals_match(&actual_vals, &expected_vals),
                             "line {line}: expected {expected_vals:?}, got {actual_vals:?}"
@@ -106,6 +107,33 @@ fn run_spec_test(manifest_path: &Path) {
                 }
             },
 
+            Command::AssertExhaustion { action, line } => {
+                match action {
+                    Action::Invoke { module, field, args } => {
+                        let instance = resolve_module(module, &current_instance, &registered_modules, *line);
+
+                        let args: Vec<Val> = args
+                            .iter()
+                            .map(|arg_val| arg_val.clone().try_into().unwrap())
+                            .collect();
+
+                        let result = instance.invoke_export(&mut store, field, args);
+
+                        let Err(err) = result else {
+                            panic!("line {line}: expected '{field}' to exhaust call stack.");
+                        };
+
+                        assert_eq!(
+                            err, ExecuteError::CallStackExhausted, 
+                            "line {line}: expected error to be exhausted call stack error, got {err:?}"
+                        );
+                    },
+
+                    // there shouldn't be any assert_exhaustion tests on Action::Get
+                    _ => unreachable!()
+                }
+            },
+
             _ => {}
         }
     }
@@ -116,18 +144,25 @@ fn run_spec_test(manifest_path: &Path) {
 /// Tests the entire WebAssembly 1.0 spec test suite.
 #[test]
 fn run_spec_test_suite() {
-    common::convert_wasts();
+    let child = std::thread::Builder::new()
+        .stack_size(STACK_SIZE_MB * 1024 * 1024)
+        .spawn(|| {
+            common::convert_wasts();
 
-    let dir = fs::read_dir(Path::new(common::SPEC_OUTPUT_DIR))
-        .expect(&format!("{} should exist.", common::SPEC_OUTPUT_DIR));
+            let dir = fs::read_dir(Path::new(common::SPEC_OUTPUT_DIR))
+                .expect(&format!("{} should exist.", common::SPEC_OUTPUT_DIR));
+            
+            for entry in dir {
+                let path = entry.unwrap().path();
+
+                if path.extension().map_or(false, |e| e == "json") {
+                    println!("running {}", path.display());
+
+                    run_spec_test(&path);
+                }
+            }
+        })
+        .unwrap();
     
-    for entry in dir {
-        let path = entry.unwrap().path();
-
-        if path.extension().map_or(false, |e| e == "json") {
-            println!("running {}", path.display());
-
-            run_spec_test(&path);
-        }
-    }
+    child.join().unwrap();
 }

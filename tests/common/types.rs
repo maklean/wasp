@@ -36,6 +36,9 @@ pub enum Command {
     #[serde(rename = "assert_trap")]
     AssertTrap { action: Action, line: u32 },
 
+    #[serde(rename = "assert_exhaustion")]
+    AssertExhaustion { action: Action, line: u32 },
+
     #[serde(other)]
     Other,
 }

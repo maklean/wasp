@@ -4,7 +4,7 @@ use crate::{definitions::{ExportDesc, Func, FuncType, ImportDesc, Mutability, Va
 pub const PAGE_SIZE: usize = 65536;
 const MAX_MEMORY_PAGES: usize = 65536;
 
-const MAX_CALL_DEPTH: usize = 46; // uh, this is somehow the number calls my pc accepts before it stack overflows...
+const MAX_CALL_DEPTH: usize = 3500;
 
 /// Runtime representation of a Wasm value.
 #[derive(Debug, Clone, Copy)]
