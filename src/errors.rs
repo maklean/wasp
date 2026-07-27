@@ -79,3 +79,12 @@ pub enum ExecuteError {
     ImportCountMismatch,
     ImportTypeMismatch,
 }
+
+pub enum RunError {
+    DecodeError(DecodeError),
+    ValidationError(ValidateError),
+    ExecutionError(ExecuteError),
+
+    ExportNotFound,
+    ExportNotFunc
+}
