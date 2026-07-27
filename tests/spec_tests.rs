@@ -41,6 +41,8 @@ fn run_spec_test(manifest_path: &Path) {
                     registered_modules.insert(name.clone(), Rc::clone(&instance));
                 }
 
+                println!("loaded {filename} (name={name:?}), exports: {:?}", instance.exports.iter().map(|e| (&e.name, &e.value)).collect::<Vec<_>>());
+
                 current_instance = Some(instance);
             },
 
@@ -57,8 +59,13 @@ fn run_spec_test(manifest_path: &Path) {
             },
 
             Command::AssertReturn { action, expected, line } => {
-                let instance = current_instance.as_ref()
-                    .unwrap_or_else(|| panic!("line {line}: no module loaded"));
+                let instance = match &action.module {
+                    Some(module) => registered_modules.get(module)
+                        .unwrap_or_else(|| panic!("line {line}: module '{module}' is not registered.")),
+
+                    None => current_instance.as_ref()
+                        .unwrap_or_else(|| panic!("line {line}: no module loaded"))
+                };
                 
                 let args: Vec<Val> = action.args
                     .iter()

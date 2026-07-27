@@ -46,6 +46,9 @@ pub struct Action {
 
     #[serde(default)]
     pub args: Vec<ArgVal>,
+
+    #[serde(default)]
+    pub module: Option<String>,
 }
 
 #[derive(Deserialize, Clone)]
