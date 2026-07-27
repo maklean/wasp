@@ -100,6 +100,11 @@ impl Module {
                 Section::Custom => (),
             }
 
+            // if we haven't read the entire section, there's a size mismatch
+            if !section.eof() {
+                return Err(DecodeError::SectionSizeMismatch);
+            }
+
             last_section_id = section_id;
         }
 
