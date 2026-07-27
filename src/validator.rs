@@ -276,7 +276,7 @@ impl<'a> Validator<'a> {
             .ok_or(ValidateError::GlobalDoesntExist { index })?;
 
         // types must be the same in order to set
-        if global.val_type != val_type {
+        if global.val_type != val_type && global.val_type != ValType::Unknown && val_type != ValType::Unknown {
             return Err(ValidateError::GlobalSetTypeMismatch { expect: global.val_type, actual: val_type });
         }
 
