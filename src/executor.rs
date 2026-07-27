@@ -1076,10 +1076,24 @@ impl Executor {
                 Instr::F32Mul => self.binop_f32(|a, b| a * b)?,
                 Instr::F32Div => self.binop_f32(|a, b| a / b)?,
                 Instr::F32Min => self.binop_f32(|a, b| {
-                    if a.is_nan() || b.is_nan() { f32::NAN } else { a.min(b) }
+                    if a.is_nan() || b.is_nan() {
+                        f32::NAN
+                    } else if a == 0.0 && b == 0.0 {
+                        // if either is -0.0, the result is -0.0
+                        if a.is_sign_negative() || b.is_sign_negative() { -0.0 } else { 0.0 }
+                    } else {
+                        a.min(b)
+                    }
                 })?,
                 Instr::F32Max => self.binop_f32(|a, b| {
-                    if a.is_nan() || b.is_nan() { f32::NAN } else { a.max(b) }
+                    if a.is_nan() || b.is_nan() {
+                        f32::NAN
+                    } else if a == 0.0 && b == 0.0 {
+                        // if either is +0.0, the result is +0.0
+                        if a.is_sign_positive() || b.is_sign_positive() { 0.0 } else { -0.0 }
+                    } else {
+                        a.max(b)
+                    }
                 })?,
                 Instr::F32Copysign => self.binop_f32(|a, b| a.copysign(b))?,
                 Instr::F32Eq => self.relop_f32(|a, b| a == b)?,
@@ -1101,10 +1115,24 @@ impl Executor {
                 Instr::F64Mul => self.binop_f64(|a, b| a * b)?,
                 Instr::F64Div => self.binop_f64(|a, b| a / b)?,
                 Instr::F64Min => self.binop_f64(|a, b| {
-                    if a.is_nan() || b.is_nan() { f64::NAN } else { a.min(b) }
+                    if a.is_nan() || b.is_nan() {
+                        f64::NAN
+                    } else if a == 0.0 && b == 0.0 {
+                        // if either is -0.0, the result is -0.0
+                        if a.is_sign_negative() || b.is_sign_negative() { -0.0 } else { 0.0 }
+                    } else {
+                        a.min(b)
+                    }
                 })?,
                 Instr::F64Max => self.binop_f64(|a, b| {
-                    if a.is_nan() || b.is_nan() { f64::NAN } else { a.max(b) }
+                    if a.is_nan() || b.is_nan() {
+                        f64::NAN
+                    } else if a == 0.0 && b == 0.0 {
+                        // if either is +0.0, the result is +0.0
+                        if a.is_sign_positive() || b.is_sign_positive() { 0.0 } else { -0.0 }
+                    } else {
+                        a.max(b)
+                    }
                 })?,
                 Instr::F64Copysign => self.binop_f64(|a, b| a.copysign(b))?,
                 Instr::F64Eq => self.relop_f64(|a, b| a == b)?,
