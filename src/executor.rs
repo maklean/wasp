@@ -2,6 +2,7 @@ use std::rc::Rc;
 use crate::{definitions::{ExportDesc, Func, FuncType, ImportDesc, Mutability, ValType}, errors::ExecuteError, instructions::{BlockType, Expr, Instr, MemArg}, module::Module};
 
 pub const PAGE_SIZE: usize = 65536;
+const MAX_MEMORY_PAGES: usize = 65536;
 
 /// Runtime representation of a Wasm value.
 #[derive(Debug, Clone, Copy)]
@@ -924,19 +925,33 @@ impl Executor {
                         .get_mut(a)
                         .expect("Memory instance should exist.");
 
-                    let mem_max_size = mem.max.unwrap_or(u32::MAX) as usize;
+                    let mem_max_size = mem.max
+                        .map(|m| m as usize)
+                        .unwrap_or(MAX_MEMORY_PAGES)
+                        .min(MAX_MEMORY_PAGES); // clamp to MAX_MEMORY_PAGES if they give a higher number of pages
 
                     let old_size = mem.data.len() / PAGE_SIZE;
 
                     let n = self.pop_value()?.as_i32();
-                    let new_size = old_size.checked_add(n as usize).ok_or(ExecuteError::Trapped)?;
 
-                    if new_size <= mem_max_size {
-                        mem.data.resize(new_size * PAGE_SIZE, 0);
-                        self.push_value(Val::I32(old_size as i32));
-                    } else {
+                    if n < 0 {
+                        // return -1 if we're passed an invalid page number
                         self.push_value(Val::I32(-1));
+                    } else {
+                        let new_size = old_size.checked_add(n as usize);
+
+                        match new_size {
+                            Some(new_size) if new_size <= mem_max_size => {
+                                // grow memory to new size and push old size onto stack
+                                mem.data.resize(new_size * PAGE_SIZE, 0);
+
+                                self.push_value(Val::I32(old_size as i32));
+                            },
+
+                            _ => self.push_value(Val::I32(-1))
+                        }
                     }
+                    
                 },
 
                 // Numeric Instructions
@@ -1287,7 +1302,7 @@ impl Executor {
                     self.locals.push(v);
                 }
 
-                println!("{:?}", code.body.instructions);
+                //println!("{:?}", code.body.instructions);
 
                 self.execute_instructions(&code.body.instructions, 0, store, &module)?;
             
