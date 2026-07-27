@@ -201,7 +201,7 @@ fn run_spec_test(manifest_path: &Path) {
                     .unwrap_or_else(|e| panic!("line {line}: failed to read {filename}: {e}"));
                 
                 let result = Module::decode(&bytes);
-
+                
                 assert!(result.is_err(), "line {line}: expected module decoding to fail, got success.");
             },
 

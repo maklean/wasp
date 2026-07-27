@@ -83,6 +83,8 @@ pub struct Func {
 }
 
 impl Func {
+    const MAX_LOCALS_PER_FUNC: usize = u16::MAX as usize;
+
     /// Returns a `Func` with only the type_idx being set/decoded.
     pub fn decode_type_idx(decoder: &mut Decoder) -> Result<Self, DecodeError> {
         Ok(Self {
@@ -93,12 +95,20 @@ impl Func {
 
     /// Decodes and sets the local variables and body of a `Func`.
     pub fn decode_locals_body(&mut self, decoder: &mut Decoder) -> Result<(), DecodeError> {
-        let num_locals_group = decoder.read_u32()?  as usize;
-        self.locals.reserve_exact(num_locals_group);
+        let num_locals_group = decoder.read_u32()? as usize;
+
+        // since each group takes at least 2 bytes, the number of groups shouldn't exceed decoder.len() / 2 
+        if num_locals_group > decoder.len() / 2 {
+            return Err(DecodeError::TooManyLocals);
+        }
 
         for _ in 0..num_locals_group {
             let n = decoder.read_u32()? as usize;
             let val_type = ValType::try_from(decoder.read_byte()?)?;
+
+            if self.locals.len() + n > Self::MAX_LOCALS_PER_FUNC {
+                return Err(DecodeError::TooManyLocals);
+            }
 
             // add 'n' of this ValType
             for _ in 0..n {

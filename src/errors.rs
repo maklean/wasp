@@ -30,6 +30,7 @@ pub enum DecodeError {
     InvalidMemoryIndex,
     InvalidFunctionCount,
     MalformedCodeSize,
+    TooManyLocals,
 }
 
 // TODO: remove repetitive variants, some of these do the exact same thing
