@@ -1,5 +1,5 @@
 use std::rc::Rc;
-use crate::{definitions::{ExportDesc, Func, FuncType, Mutability, ValType}, errors::ExecuteError, instructions::{BlockType, Expr, Instr, MemArg}, module::Module};
+use crate::{definitions::{ExportDesc, Func, FuncType, ImportDesc, Mutability, ValType}, errors::ExecuteError, instructions::{BlockType, Expr, Instr, MemArg}, module::Module};
 
 pub const PAGE_SIZE: usize = 65536;
 
@@ -175,6 +175,9 @@ impl ModuleInstance {
         store: &mut Store,
         imports: Vec<ExternVal>,
     ) -> Result<Rc<Self>, ExecuteError> {
+        // check if the embedder and module imports match
+        Self::check_imports(module, store, &imports)?;
+
         let mut imported_func_addrs = Vec::new();
         let mut imported_table_addrs = Vec::new();
         let mut imported_mem_addrs = Vec::new();
@@ -340,6 +343,85 @@ impl ModuleInstance {
         }
 
         Ok(this)
+    }
+
+    /// Verifies the imports passed by the embedder against `module.imports`.
+    fn check_imports(module: &Module, store: &Store, imports: &[ExternVal]) -> Result<(), ExecuteError> {
+        if module.imports.len() != imports.len() {
+            return Err(ExecuteError::ImportCountMismatch);
+        }
+
+        for (module_import, embedder_import) in module.imports.iter().zip(imports.iter()) {
+            match (&module_import.desc, embedder_import) {
+                (ImportDesc::Func(type_idx), ExternVal::Func(addr)) => {
+                    // check for func signature mismatch
+                    let expected_sig = &module.types[*type_idx as usize];
+
+                    let actual_sig = match &store.funcs[*addr] {
+                        FuncInstance::Host { func_type, .. } => func_type,
+                        FuncInstance::Wasm { func_type, .. } => func_type,
+                    };
+
+                    if expected_sig.params != actual_sig.params || expected_sig.results != actual_sig.results {
+                        return Err(ExecuteError::ImportTypeMismatch)
+                    }
+                },
+
+                (ImportDesc::Table(expected_table), ExternVal::Table(table_addr)) => {
+                    let actual_table = &store.tables[*table_addr];
+
+                    // actual table size must be at least the declared min
+                    if expected_table.limits.min > actual_table.elem.len() as u32 {
+                        return Err(ExecuteError::ImportTypeMismatch);
+                    }
+
+                    // if there's a declared max, the actual table max should be at most the declared max
+                    if let Some(expected_max) = expected_table.limits.max {
+                        let actual_max = actual_table.max
+                            .ok_or(ExecuteError::ImportTypeMismatch)?;
+
+                        // unsafe if it passes the module's table max
+                        if actual_max > expected_max {
+                            return Err(ExecuteError::ImportTypeMismatch);
+                        }
+                    }
+                },
+
+                (ImportDesc::Mem(expected_mem), ExternVal::Mem(mem_addr)) => {
+                    let actual_mem = &store.mems[*mem_addr];
+
+                    // actual mem size must be at least the declared min
+                    if expected_mem.min > (actual_mem.data.len() / PAGE_SIZE) as u32 {
+                        return Err(ExecuteError::ImportTypeMismatch);
+                    }
+
+                    // if there's a declared max, the actual mem max should be at most the declared max
+                    if let Some(expected_max) = expected_mem.max {
+                        let actual_max = actual_mem.max
+                            .ok_or(ExecuteError::ImportTypeMismatch)?;
+
+                        if actual_max > expected_max {
+                            return Err(ExecuteError::ImportTypeMismatch);
+                        }
+                    }
+                },
+
+                (ImportDesc::Global(expected_global), ExternVal::Global(global_addr)) => {
+                    let actual_global = &store.globals[*global_addr];
+
+                    // should be the same val type and mutability
+                    let actual_val_type: ValType = actual_global.value.try_into().unwrap();
+
+                    if expected_global.val_type != actual_val_type || expected_global.mutability != actual_global.mutability {
+                        return Err(ExecuteError::ImportTypeMismatch);
+                    }
+                },
+
+                _ => return Err(ExecuteError::ImportTypeMismatch)
+            }
+        }
+
+        Ok(())
     }
 }
 

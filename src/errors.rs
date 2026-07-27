@@ -76,4 +76,6 @@ pub enum ExecuteError {
     InvalidFuncIndex,
     InvalidGlobalIndex,
     InvalidMemAddressIndex,
+    ImportCountMismatch,
+    ImportTypeMismatch,
 }
