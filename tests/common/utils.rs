@@ -1,6 +1,6 @@
 use std::{collections::HashMap, rc::Rc};
 
-use wasp::executor::{ModuleInstance, Val};
+use wasp::{executor::{ModuleInstance, Val}};
 
 /// Returns whether the two collection of values are the same.
 pub fn vals_match(a: &[Val], b: &[Val]) -> bool {

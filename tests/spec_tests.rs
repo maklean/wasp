@@ -61,6 +61,24 @@ fn run_spec_test(manifest_path: &Path) {
                 registered_modules.insert(as_.to_string(), Rc::clone(instance));
             },
 
+            Command::Action { action, line } => {
+                match action {
+                    Action::Invoke { module, field, args } => {
+                        let instance = resolve_module(module, &current_instance, &registered_modules, *line);
+                    
+                        let args: Vec<Val> = args
+                            .iter()
+                            .map(|arg_val| arg_val.clone().try_into().unwrap())
+                            .collect();
+
+                        instance.invoke_export(&mut store, field, args)
+                            .unwrap_or_else(|e| panic!("line {line}: expected success, got {e:?}"));
+                    },
+
+                    _ => unreachable!()
+                }
+            },
+
             Command::AssertReturn { action, expected, line } => {
                 let expected_vals: Vec<Val> = expected
                     .iter()

@@ -30,6 +30,9 @@ pub enum Command {
         as_: String 
     },
 
+    #[serde(rename = "action")]
+    Action { action: Action, line: u32 },
+
     #[serde(rename = "assert_return")]
     AssertReturn { action: Action, expected: Vec<ArgVal>, line: u32 },
 
