@@ -1,6 +1,6 @@
 use std::{fs, path::Path};
 
-use wasp::module::Module;
+use wasp::{module::Module, validator::Validator};
 
 use crate::common::{Command, Manifest};
 
@@ -22,7 +22,8 @@ fn run_spec_test(manifest_path: &Path) {
                 let module = Module::decode(&bytes)
                     .unwrap_or_else(|e| panic!("line {line}: failed to decode {filename}: {e:?}"));
 
-                
+                Validator::validate(&module)
+                    .unwrap_or_else(|e| panic!("line {line}: failed to validate {filename}: {e:?}"));
             },
             _ => {}
         }
