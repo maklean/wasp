@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fs, path::Path, rc::Rc};
 
-use wasp::{errors::ExecuteError, executor::{ExternVal, FuncInstance, ModuleInstance, Store, Val}, module::Module, validator::Validator};
+use wasp::{errors::ExecuteError, executor::{ExternVal, ModuleInstance, Store, Val}, module::Module, validator::Validator};
 
 use crate::common::{Action, Command, Manifest, register_spectest, resolve_module, spectest_imports, vals_match};
 
