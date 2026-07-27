@@ -194,6 +194,17 @@ fn run_spec_test(manifest_path: &Path) {
                 assert!(result.is_err(), "line {line}: expected module instantiation to fail, got success.");
             },
 
+            Command::AssertMalformed { line, filename, module_type } => {
+                if module_type != "binary" { continue; }
+
+                let bytes = fs::read(dir.join(filename))
+                    .unwrap_or_else(|e| panic!("line {line}: failed to read {filename}: {e}"));
+                
+                let result = Module::decode(&bytes);
+
+                assert!(result.is_err(), "line {line}: expected module decoding to fail, got success.");
+            },
+
             _ => {}
         }
     }

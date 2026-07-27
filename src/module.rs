@@ -70,6 +70,12 @@ impl Module {
 
             // skip custom sections
             if section_id == Section::Custom {
+                let name_len = section.read_u32()? as usize;
+                let name_bytes = section.read_bytes(name_len)?;
+
+                std::str::from_utf8(name_bytes)
+                    .map_err(|_| DecodeError::InvalidUTF8Name)?;
+                
                 continue;
             }
 
