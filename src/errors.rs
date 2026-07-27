@@ -60,6 +60,7 @@ pub enum ValidateError {
     UndefinedTableInContext { index: usize },
     UndefinedLinearMemoryInContext { index: usize },
     UndefinedGlobalInContext { index: usize },
+    UndefinedTypeInContext { index: usize },
     InvalidStartFunction,
     TooManyTables,
     TooManyMems,

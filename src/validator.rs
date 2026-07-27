@@ -12,7 +12,7 @@ pub struct Validator<'a> {
 
 impl<'a> Validator<'a> {
     pub fn validate(module: &'a Module) -> Result<(), ValidateError> {
-        let mut this = Self { ctx: Context::new(module), opds: Vec::new(), ctrls: Vec::new() };
+        let mut this = Self { ctx: Context::new(module)?, opds: Vec::new(), ctrls: Vec::new() };
 
         // validate functions
         for func in &module.funcs {
@@ -421,22 +421,27 @@ pub struct Context<'a> {
 
 impl<'a> Context<'a> {
     /// Creates a `Context` from the given module.
-    fn new(module: &'a Module) -> Self {
+    fn new(module: &'a Module) -> Result<Self, ValidateError> {
         let types: &'a Vec<FuncType> = &module.types;
 
         // Types of imported functions + types of module functions
-        let funcs: Vec<&'a FuncType> = module.imports
-            .iter()
-            .filter_map(|im| match im.desc {
-                ImportDesc::Func(type_idx) => Some(&module.types[type_idx as usize]),
-                _ => None,
-            })
-            .chain(
-                module.funcs
-                    .iter()
-                    .map(|f| &module.types[f.type_idx as usize])
-            )
-            .collect();
+        let mut funcs: Vec<&'a FuncType> = Vec::new();
+
+        for im in &module.imports {
+            if let ImportDesc::Func(type_idx) = im.desc {
+                let index = type_idx as usize;
+                let ty = module.types.get(index)
+                    .ok_or(ValidateError::UndefinedTypeInContext { index })?;
+                funcs.push(ty);
+            }
+        }
+
+        for f in &module.funcs {
+            let index = f.type_idx as usize;
+            let ty = module.types.get(index)
+                .ok_or(ValidateError::UndefinedTypeInContext { index })?;
+            funcs.push(ty);
+        }
 
         // types of all imported tables + module tables
         let tables: Vec<&'a TableType> = module.imports
@@ -468,7 +473,7 @@ impl<'a> Context<'a> {
             .chain(module.globals.iter().map(|global| &global.global_type))
             .collect();
         
-        Self {
+        Ok(Self {
             module,
 
             types,
@@ -479,7 +484,7 @@ impl<'a> Context<'a> {
 
             // to be filled later when we enter a function body
             locals: Vec::new(),
-        }
+        })
     }
 
     /// Returns the number of globals from the module that are imports.
