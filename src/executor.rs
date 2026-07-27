@@ -4,6 +4,8 @@ use crate::{definitions::{ExportDesc, Func, FuncType, ImportDesc, Mutability, Va
 pub const PAGE_SIZE: usize = 65536;
 const MAX_MEMORY_PAGES: usize = 65536;
 
+const MAX_CALL_DEPTH: usize = 46; // uh, this is somehow the number calls my pc accepts before it stack overflows...
+
 /// Runtime representation of a Wasm value.
 #[derive(Debug, Clone, Copy)]
 pub enum Val {
@@ -528,6 +530,7 @@ pub struct Executor {
     pub locals: Vec<Val>,
     pub current_frame: Frame,
     pub current_block: Block,
+    pub call_depth: usize,
 }
 
 impl Executor {
@@ -537,6 +540,7 @@ impl Executor {
             locals: Vec::new(),
             current_frame: Frame::default(),
             current_block: Block::default(),
+            call_depth: 0
         }
     }
 
@@ -1270,47 +1274,59 @@ impl Executor {
 
     /// Calls the function at the given index.
     pub fn call_function(&mut self, func_idx: usize, store: &mut Store) -> Result<(), ExecuteError> {
-        let func = store.funcs
-            .get(func_idx)
-            .expect(&format!("Function at index {func_idx} should exist."));
-        
-        match func {
-            FuncInstance::Host { func_type , code } => {
-                let code = Rc::clone(code);
+        self.call_depth += 1;
 
-                let arity = func_type.params.len();
-                
-                let mut params: Vec<Val> = Vec::with_capacity(arity);
-                for _ in 0..arity { params.push(self.pop_value()?); }
-
-                params.reverse();
-
-                let results = (code.func)(store, params)?;
-                
-                for v in results {
-                    self.push_value(v);
-                }
-            },
-
-            FuncInstance::Wasm { func_type, module, code } => {
-                let module = Rc::clone(module);
-                let code = Rc::clone(code);
-
-                let prev_frame = self.enter_frame((**func_type).clone())?;
-
-                for v in code.locals.iter().copied().map(Val::zero) {
-                    self.locals.push(v);
-                }
-
-                //println!("{:?}", code.body.instructions);
-
-                self.execute_instructions(&code.body.instructions, 0, store, &module)?;
-            
-                self.exit_frame(prev_frame);
-            }
+        if self.call_depth > MAX_CALL_DEPTH {
+            return Err(ExecuteError::CallStackExhausted);
         }
+
+        let result = (|| -> Result<(), ExecuteError> {
+            let func = store.funcs
+                .get(func_idx)
+                .expect(&format!("Function at index {func_idx} should exist."));
+            
+            match func {
+                FuncInstance::Host { func_type , code } => {
+                    let code = Rc::clone(code);
+
+                    let arity = func_type.params.len();
+                    
+                    let mut params: Vec<Val> = Vec::with_capacity(arity);
+                    for _ in 0..arity { params.push(self.pop_value()?); }
+
+                    params.reverse();
+
+                    let results = (code.func)(store, params)?;
+                    
+                    for v in results {
+                        self.push_value(v);
+                    }
+                },
+
+                FuncInstance::Wasm { func_type, module, code } => {
+                    let module = Rc::clone(module);
+                    let code = Rc::clone(code);
+
+                    let prev_frame = self.enter_frame((**func_type).clone())?;
+
+                    for v in code.locals.iter().copied().map(Val::zero) {
+                        self.locals.push(v);
+                    }
+
+                    //println!("{:?}", code.body.instructions);
+
+                    self.execute_instructions(&code.body.instructions, 0, store, &module)?;
+                
+                    self.exit_frame(prev_frame);
+                }
+            };
+
+            Ok(())
+        })();
+
+        self.call_depth -= 1;
         
-        Ok(())
+        result
     }
 
     /// Loads `N` bits from the only defined memory instance into a static 8-byte buffer.

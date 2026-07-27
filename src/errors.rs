@@ -78,6 +78,7 @@ pub enum ExecuteError {
     InvalidMemAddressIndex,
     ImportCountMismatch { module_count: usize, embedder_count: usize },
     ImportTypeMismatch,
+    CallStackExhausted,
 }
 
 #[derive(Debug)]
