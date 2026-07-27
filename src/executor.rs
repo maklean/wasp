@@ -932,7 +932,7 @@ impl Executor {
                     let new_size = old_size.checked_add(n as usize).ok_or(ExecuteError::Trapped)?;
 
                     if new_size <= mem_max_size {
-                        mem.data.resize(new_size, 0);
+                        mem.data.resize(new_size * PAGE_SIZE, 0);
                         self.push_value(Val::I32(old_size as i32));
                     } else {
                         self.push_value(Val::I32(-1));
@@ -1286,6 +1286,8 @@ impl Executor {
                 for v in code.locals.iter().copied().map(Val::zero) {
                     self.locals.push(v);
                 }
+
+                println!("{:?}", code.body.instructions);
 
                 self.execute_instructions(&code.body.instructions, 0, store, &module)?;
             
