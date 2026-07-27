@@ -38,58 +38,6 @@ pub struct Module {
 }
 
 impl Module {
-    // TODO: lowk this API is shit, I gotta refactor what gets exposed to the user and how they use it.
-    pub fn run(
-        bytes: &[u8],
-        store: &mut Store,
-        imports: Vec<ExternVal>,
-        entry: &str,
-        args: Vec<Val>
-    ) -> Result<Vec<Val>, RunError> {
-        let module = Module::decode(bytes)
-            .map_err(|e| RunError::DecodeError(e))?;
-        
-        Validator::validate(&module)
-            .map_err(|e| RunError::ValidationError(e))?;
-
-        let instance = ModuleInstance::new(&module, store, imports)
-            .map_err(|e| RunError::ExecutionError(e))?;
-
-        // run the entry function with the given arguments
-        let export = instance.exports
-            .iter()
-            .find(|e| e.name == entry)
-            .ok_or(RunError::ExportNotFound)?;
-        
-        let ExternVal::Func(func_addr) = export.value else {
-            return Err(RunError::ExportNotFunc);
-        };
-
-        let arity = match &store.funcs[func_addr] {
-            FuncInstance::Wasm { func_type, .. } => func_type.results.len(),
-            FuncInstance::Host { func_type, .. } => func_type.results.len(),
-        };
-
-        let mut executor = Executor::new();
-        for v in args {
-            executor.push_value(v);
-        }
-
-        executor.call_function(func_addr, store)
-            .map_err(|e| RunError::ExecutionError(e))?;
-
-        // get results off the stack
-        let mut results: Vec<Val> = Vec::with_capacity(arity);
-
-        for _ in 0..arity {
-            results.push(executor.pop_value().map_err(|e| RunError::ExecutionError(e))?);
-        }
-
-        results.reverse();
-
-        Ok(results)
-    }
-
     pub fn decode(bytes: &[u8]) -> Result<Self, DecodeError> {
         let mut decoder = Decoder::new(bytes);
 

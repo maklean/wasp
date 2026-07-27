@@ -42,17 +42,18 @@ pub enum Command {
 
 #[derive(Deserialize)]
 pub struct Action {
-    field: String,
+    pub field: String,
 
     #[serde(default)]
-    args: Vec<ArgVal>,
+    pub args: Vec<ArgVal>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct ArgVal {
     #[serde(rename = "type")]
-    ty: String,
-    value: String,
+    pub ty: String,
+
+    pub value: String,
 }
 
 impl TryInto<Val> for ArgVal {

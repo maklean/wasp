@@ -345,6 +345,42 @@ impl ModuleInstance {
         Ok(this)
     }
 
+    /// Calls the given function by name on the module instance.
+    pub fn invoke_export(&self, store: &mut Store, name: &str, args: Vec<Val>) -> Result<Vec<Val>, ExecuteError> {
+        let export = self.exports
+            .iter()
+            .find(|export| export.name == name)
+            .unwrap_or_else(|| panic!("export '{name}' not found in module."));
+
+        let ExternVal::Func(func_addr) = export.value else {
+            panic!("export '{name}' is not a function.");
+        };
+
+        let arity = match &store.funcs[func_addr] {
+            FuncInstance::Wasm { func_type, .. } => func_type.results.len(),
+            FuncInstance::Host { func_type, .. } => func_type.results.len(),
+        };
+
+        let mut executor = Executor::new();
+        
+        for v in args {
+            executor.push_value(v);
+        }
+
+        executor.call_function(func_addr, store)?;
+
+        // get results off the stack
+        let mut results: Vec<Val> = Vec::with_capacity(arity);
+
+        for _ in 0..arity {
+            results.push(executor.pop_value()?);
+        }
+
+        results.reverse();
+
+        Ok(results)
+    }
+
     /// Verifies the imports passed by the embedder against `module.imports`.
     fn check_imports(module: &Module, store: &Store, imports: &[ExternVal]) -> Result<(), ExecuteError> {
         if module.imports.len() != imports.len() {
