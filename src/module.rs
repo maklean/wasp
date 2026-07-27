@@ -159,11 +159,6 @@ impl Module {
     fn decode_table_section(&mut self, decoder: &mut Decoder) -> Result<(), DecodeError> {
         let num_tables = decoder.read_u32()? as usize;
 
-        // there's only at most one table allowed in Wasm 1.0
-        if num_tables > 1 {
-            return Err(DecodeError::InvalidTableCount);
-        }
-
         self.tables.reserve_exact(num_tables);
 
         for _ in 0..num_tables {
@@ -176,11 +171,6 @@ impl Module {
     /// Decodes the memory section in the module.
     fn decode_memory_section(&mut self, decoder: &mut Decoder) -> Result<(), DecodeError> {
         let num_memories = decoder.read_u32()? as usize;
-
-        // there's only at most one linear memory allowed in Wasm 1.0
-        if num_memories > 1 {
-            return Err(DecodeError::InvalidMemoryCount);
-        }
 
         self.mems.reserve_exact(num_memories);
 

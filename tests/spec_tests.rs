@@ -205,6 +205,20 @@ fn run_spec_test(manifest_path: &Path) {
                 assert!(result.is_err(), "line {line}: expected module decoding to fail, got success.");
             },
 
+            Command::AssertInvalid { line, filename, module_type } => {
+                if module_type != "binary" { continue; }
+
+                let bytes = fs::read(dir.join(filename))
+                    .unwrap_or_else(|e| panic!("line {line}: failed to read {filename}: {e}"));
+                
+                let module = Module::decode(&bytes)
+                    .unwrap_or_else(|e| panic!("line {line}: failed to decode {filename}: {e:?}"));
+
+                let result = Validator::validate(&module);
+
+                assert!(result.is_err(), "line {line}: expected module validation to fail, got success.");
+            }
+
             _ => {}
         }
     }

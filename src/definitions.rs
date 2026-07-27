@@ -197,10 +197,6 @@ impl Global {
         let global_type = GlobalType::decode(decoder)?;
         let init = Expr::decode(decoder)?;
 
-        if !init.is_const() {
-            return Err(DecodeError::InvalidNonConstExpr);
-        }
-
         Ok(Self { global_type, init })
     }
 
@@ -236,11 +232,6 @@ impl Elem {
         }
 
         let offset = Expr::decode(decoder)?;
-
-        // the offset expression has to be a constant expression
-        if !offset.is_const() {
-            return Err(DecodeError::InvalidNonConstExpr);
-        }
 
         // get func indexes.
         let num_funcs = decoder.read_u32()? as usize;
@@ -290,17 +281,7 @@ impl Data {
     pub fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
         let mem_idx = decoder.read_u32()?;
 
-        // only one linear memory is allowed in Wasm 1.0
-        if mem_idx != 0 {
-            return Err(DecodeError::InvalidMemoryIndex);
-        }
-
         let offset = Expr::decode(decoder)?;
-
-        // the offset expression has to be a constant expression
-        if !offset.is_const() {
-            return Err(DecodeError::InvalidNonConstExpr);
-        }
 
         let num_bytes = decoder.read_u32()? as usize;
         let mut init: Vec<u8> = Vec::with_capacity(num_bytes);
