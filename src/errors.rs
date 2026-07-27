@@ -80,6 +80,7 @@ pub enum ExecuteError {
     ImportTypeMismatch,
 }
 
+#[derive(Debug)]
 pub enum RunError {
     DecodeError(DecodeError),
     ValidationError(ValidateError),
