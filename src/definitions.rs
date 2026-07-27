@@ -320,6 +320,7 @@ impl Data {
 }
 
 /// Wasm module import outline.
+#[derive(Debug)]
 pub struct Import {
     /// Module name.
     pub module: String,
@@ -389,6 +390,7 @@ impl Export {
 }
 
 /// Description/schema of a table.
+#[derive(Debug)]
 pub struct TableType {
     /// Min (initial) and (optional) max size of the table.
     pub limits: Limits,
@@ -416,6 +418,7 @@ impl TableType {
 }
 
 /// Details the minimum and (optional) maximum size of a definition (mainly for tables and linear memories).
+#[derive(Debug)]
 pub struct Limits {
     pub min: u32,
     pub max: Option<u32>,
@@ -459,7 +462,7 @@ impl Limits {
 }
 
 /// Types of elements in a table (In Wasm 1.0, the only ElemType is a function reference / index to a Func).
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 pub enum ElemType {
     FuncRef,
 }
@@ -476,7 +479,7 @@ impl TryFrom<u8> for ElemType {
 }
 
 /// Description/schema of a global variable.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct GlobalType {
     /// Type of the global's value.
     pub val_type: ValType,
@@ -502,7 +505,7 @@ impl GlobalType {
 }
 
 /// Details the possible mutabilities of data.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Mutability {
     /// Immutable.
     Const,
@@ -524,6 +527,7 @@ impl TryFrom<u8> for Mutability {
 }
 
 /// Types of imports.
+#[derive(Debug)]
 pub enum ImportDesc {
     /// Function index.
     Func(u32),

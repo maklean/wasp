@@ -2,7 +2,7 @@ use std::{fs, path::Path, rc::Rc};
 
 use wasp::{executor::{ModuleInstance, Store}, module::Module, validator::Validator};
 
-use crate::common::{Command, Manifest};
+use crate::common::{Command, Manifest, register_spectest, spectest_imports};
 
 mod common;
 
@@ -15,6 +15,9 @@ fn run_spec_test(manifest_path: &Path) {
 
     let mut store = Store::new();
     let mut current_instance: Option<Rc<ModuleInstance>> = None;
+
+    // add spectest module to store
+    register_spectest(&mut store);
     
     for cmd in &manifest.commands {
         match cmd {
@@ -24,6 +27,10 @@ fn run_spec_test(manifest_path: &Path) {
                 
                 let module = Module::decode(&bytes)
                     .unwrap_or_else(|e| panic!("line {line}: failed to decode {filename}: {e:?}"));
+
+                for imp in &module.imports {
+                    println!("{:?}", imp)
+                }
 
                 Validator::validate(&module)
                     .unwrap_or_else(|e| panic!("line {line}: failed to validate {filename}: {e:?}"));
