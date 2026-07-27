@@ -97,11 +97,6 @@ impl Func {
     pub fn decode_locals_body(&mut self, decoder: &mut Decoder) -> Result<(), DecodeError> {
         let num_locals_group = decoder.read_u32()? as usize;
 
-        // since each group takes at least 2 bytes, the number of groups shouldn't exceed decoder.len() / 2 
-        if num_locals_group > decoder.len() / 2 {
-            return Err(DecodeError::TooManyLocals);
-        }
-
         for _ in 0..num_locals_group {
             let n = decoder.read_u32()? as usize;
             let val_type = ValType::try_from(decoder.read_byte()?)?;

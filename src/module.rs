@@ -62,6 +62,7 @@ impl Module {
     /// Decodes each section in the module.
     fn decode_sections(&mut self, decoder: &mut Decoder) -> Result<(), DecodeError> {
         let mut last_section_id = Section::Custom;
+        let mut seen_code_section = false;
 
         while !decoder.eof() {
             let section_id: Section = Section::try_from(decoder.read_byte()?)?;
@@ -75,7 +76,7 @@ impl Module {
 
                 std::str::from_utf8(name_bytes)
                     .map_err(|_| DecodeError::InvalidUTF8Name)?;
-                
+
                 continue;
             }
 
@@ -94,12 +95,17 @@ impl Module {
                 Section::Export => self.decode_export_section(&mut section)?,
                 Section::Start => self.start = Some(section.read_u32()?),
                 Section::Element => self.decode_element_section(&mut section)?,
-                Section::Code => self.decode_code_section(&mut section)?,
+                Section::Code => { self.decode_code_section(&mut section)?; seen_code_section = true; },
                 Section::Data => self.decode_data_section(&mut section)?,
                 Section::Custom => (),
             }
 
             last_section_id = section_id;
+        }
+
+        // check if we've declared functions, but haven't decoded any bodies
+        if !self.funcs.is_empty() && !seen_code_section {
+            return Err(DecodeError::InvalidFunctionCount);
         }
 
         Ok(())
