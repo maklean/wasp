@@ -1,6 +1,6 @@
-use std::path::Path;
+use std::{path::Path, rc::Rc};
 
-use crate::{decoder::Decoder, definitions::*, errors::{DecodeError, ValidateError}, validator::Validator};
+use crate::{decoder::Decoder, definitions::*, errors::{DecodeError, ExecuteError, ValidateError}, executor::{ExternVal, ModuleInstance, Store}, validator::Validator};
 
 /// Wasm module representation.
 #[derive(Default)]
@@ -71,7 +71,14 @@ impl Module {
     }
 
     /// Validates the current module.
-    pub fn validate(&self) -> Result<(), ValidateError> { Validator::validate(self) }
+    pub fn validate(&self) -> Result<(), ValidateError> { 
+        Validator::validate(self) 
+    }
+
+    /// Instantiates the current module.
+    pub fn instantiate(&self, store: &mut Store, imports: Vec<ExternVal>) -> Result<Rc<ModuleInstance>, ExecuteError> { 
+        ModuleInstance::new(self, store, imports) 
+    }
 }
 
 // Specific decoding functions.

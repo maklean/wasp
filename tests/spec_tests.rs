@@ -38,7 +38,7 @@ fn run_spec_test(manifest_path: &Path) {
                     .unwrap_or_else(|e| panic!("line {line}: failed to validate {filename}: {e:?}"));
 
                 let imports = spectest_imports(&module, &spectest_exports, &registered_modules, filename, line).unwrap();
-                let instance = ModuleInstance::new(&module, &mut store, imports)
+                let instance = module.instantiate(&mut store, imports)
                     .unwrap_or_else(|e| panic!("line {line}: failed to instantiate {filename}: {e:?}"));
 
                 if !name.is_empty() {
@@ -188,7 +188,7 @@ fn run_spec_test(manifest_path: &Path) {
                     .unwrap_or_else(|e| panic!("line {line}: failed to validate {filename}: {e:?}"));
 
                 let imports = spectest_imports(&module, &spectest_exports, &registered_modules, filename, line).unwrap();
-                let result = ModuleInstance::new(&module, &mut store, imports);
+                let result = module.instantiate(&mut store, imports);
 
                 assert!(result.is_err(), "line {line}: expected module instantiation (uninstantiable) to fail, got success.");
             },
@@ -233,7 +233,7 @@ fn run_spec_test(manifest_path: &Path) {
                 // either the import lookup or module instantiation should fail
                 let result = spectest_imports(&module, &spectest_exports, &registered_modules, filename, line)
                     .and_then(|imports| {
-                        ModuleInstance::new(&module, &mut store, imports)
+                        module.instantiate(&mut store, imports)
                             .map_err(|e| format!("{e:?}"))
                     });
 

@@ -173,7 +173,7 @@ pub struct ModuleInstance {
 }
 
 impl ModuleInstance {
-    pub fn new(
+    pub(crate) fn new(
         module: &Module,
         store: &mut Store,
         imports: Vec<ExternVal>,

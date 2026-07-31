@@ -1,6 +1,7 @@
 use crate::{definitions::{FuncType, GlobalType, ImportDesc, Limits, Mutability, TableType, ValType}, errors::ValidateError, instructions::MemArg, module::Module};
 
 pub struct Validator<'a> {
+    /// Imported + In-module definitions.
     pub ctx: Context<'a>,
 
     /// Operand Stack - keeps track of types of operand values.
