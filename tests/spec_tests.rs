@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fs, path::Path, rc::Rc};
 
-use wasp::{errors::ExecuteError, executor::{ExternVal, ModuleInstance, Store, Val}, module::Module, validator::Validator};
+use wasp::{errors::ExecuteError, executor::{ExternVal, ModuleInstance, Store, Val}, module::Module};
 
 use crate::common::{Action, Command, Manifest, register_spectest, resolve_module, spectest_imports, vals_match};
 
@@ -31,14 +31,14 @@ fn run_spec_test(manifest_path: &Path) {
                 let bytes = fs::read(dir.join(filename))
                     .unwrap_or_else(|e| panic!("line {line}: failed to read {filename}: {e}"));
                 
-                let module = Module::decode(&bytes)
+                let module = Module::decode_from_bytes(&bytes)
                     .unwrap_or_else(|e| panic!("line {line}: failed to decode {filename}: {e:?}"));
 
-                Validator::validate(&module)
+                module.validate()
                     .unwrap_or_else(|e| panic!("line {line}: failed to validate {filename}: {e:?}"));
 
                 let imports = spectest_imports(&module, &spectest_exports, &registered_modules, filename, line).unwrap();
-                let instance = ModuleInstance::new(&module, &mut store, imports)
+                let instance = module.instantiate(&mut store, imports)
                     .unwrap_or_else(|e| panic!("line {line}: failed to instantiate {filename}: {e:?}"));
 
                 if !name.is_empty() {
@@ -181,14 +181,14 @@ fn run_spec_test(manifest_path: &Path) {
                 let bytes = fs::read(dir.join(filename))
                     .unwrap_or_else(|e| panic!("line {line}: failed to read {filename}: {e}"));
                 
-                let module = Module::decode(&bytes)
+                let module = Module::decode_from_bytes(&bytes)
                     .unwrap_or_else(|e| panic!("line {line}: failed to decode {filename}: {e:?}"));
 
-                Validator::validate(&module)
+                module.validate()
                     .unwrap_or_else(|e| panic!("line {line}: failed to validate {filename}: {e:?}"));
 
                 let imports = spectest_imports(&module, &spectest_exports, &registered_modules, filename, line).unwrap();
-                let result = ModuleInstance::new(&module, &mut store, imports);
+                let result = module.instantiate(&mut store, imports);
 
                 assert!(result.is_err(), "line {line}: expected module instantiation (uninstantiable) to fail, got success.");
             },
@@ -199,7 +199,7 @@ fn run_spec_test(manifest_path: &Path) {
                 let bytes = fs::read(dir.join(filename))
                     .unwrap_or_else(|e| panic!("line {line}: failed to read {filename}: {e}"));
                 
-                let result = Module::decode(&bytes);
+                let result = Module::decode_from_bytes(&bytes);
                 
                 assert!(result.is_err(), "line {line}: expected module decoding to fail, got success.");
             },
@@ -210,10 +210,10 @@ fn run_spec_test(manifest_path: &Path) {
                 let bytes = fs::read(dir.join(filename))
                     .unwrap_or_else(|e| panic!("line {line}: failed to read {filename}: {e}"));
                 
-                let module = Module::decode(&bytes)
+                let module = Module::decode_from_bytes(&bytes)
                     .unwrap_or_else(|e| panic!("line {line}: failed to decode {filename}: {e:?}"));
 
-                let result = Validator::validate(&module);
+                let result = module.validate();
 
                 assert!(result.is_err(), "line {line}: expected module validation to fail, got success.");
             },
@@ -224,16 +224,16 @@ fn run_spec_test(manifest_path: &Path) {
                 let bytes = fs::read(dir.join(filename))
                     .unwrap_or_else(|e| panic!("line {line}: failed to read {filename}: {e}"));
                 
-                let module = Module::decode(&bytes)
+                let module = Module::decode_from_bytes(&bytes)
                     .unwrap_or_else(|e| panic!("line {line}: failed to decode {filename}: {e:?}"));
 
-                Validator::validate(&module)
+                module.validate()
                     .unwrap_or_else(|e| panic!("line {line}: failed to validate {filename}: {e:?}"));
 
                 // either the import lookup or module instantiation should fail
                 let result = spectest_imports(&module, &spectest_exports, &registered_modules, filename, line)
                     .and_then(|imports| {
-                        ModuleInstance::new(&module, &mut store, imports)
+                        module.instantiate(&mut store, imports)
                             .map_err(|e| format!("{e:?}"))
                     });
 

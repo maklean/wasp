@@ -29,6 +29,7 @@ pub enum DecodeError {
     MalformedCodeSize,
     TooManyLocals,
     SectionSizeMismatch,
+    Io,
 }
 
 // TODO: remove repetitive variants, some of these do the exact same thing
