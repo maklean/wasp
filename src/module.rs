@@ -1,6 +1,6 @@
 use std::{fs, path::Path};
 
-use crate::{binary::ParsedModule, errors::DecodingError};
+use crate::{binary::ParsedModule, errors::{DecodingError, ValidationError}, validation::Validator};
 
 pub struct Module {
     pub parsed: ParsedModule
@@ -20,5 +20,10 @@ impl Module {
         Ok(Self { 
             parsed: ParsedModule::decode_from_bytes(bytes)?
         })
+    }
+
+    /// Validates the current module.
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        Validator::validate(&self.parsed)
     }
 }

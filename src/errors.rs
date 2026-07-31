@@ -1,8 +1,8 @@
 use std::io;
 
-use crate::binary::ModuleSection;
+use crate::{binary::ModuleSection, structure::ValType};
 
-/// Error from decoding a Wasm module.
+/// Errors from decoding a Wasm module.
 #[derive(Debug)]
 pub enum DecodingError {
     UnexpectedEof { pos: usize },
@@ -13,7 +13,7 @@ pub enum DecodingError {
     InvalidSectionId { actual: u8 },
     InvalidUTF8Name { pos: usize },
     InvalidSectionOrder { last: ModuleSection, curr: ModuleSection },
-    SectionSizeMismatch { expected: usize, actual: usize },
+    SectionSizeMismatch { expect: usize, actual: usize },
     FunctionCodeCountMismatch { func_count: usize, code_count: usize },
     InvalidFuncTypeMarker { pos: usize, actual: u8 },
     InvalidValType { actual: u8 },
@@ -23,7 +23,7 @@ pub enum DecodingError {
     InvalidImportDesc { actual: u8 },
     InvalidExportDesc { actual: u8 },
     TooManyLocals,
-    InvalidFuncCodeSize { expected: usize, actual: usize },
+    InvalidFuncCodeSize { expect: usize, actual: usize },
     ExpectedEndOfInstrSeq { actual: u8 },
     InvalidInstr { actual: u8 },
     InvalidMemorySizeInstr { actual: u8 },
@@ -33,12 +33,25 @@ pub enum DecodingError {
     Io(io::Error),
 }
 
-/// Error from validating a Wasm module.
+/// Errors from validating a Wasm module.
+#[derive(Debug)]
 pub enum ValidationError {
-
+    ExpectedControlFrame,
+    PoppingOutsideControlFrame { frame_height: usize },
+    ExpectedOperandInOpdStack,
+    OperandMismatch { expect: ValType, actual: ValType },
+    StackHeightMismatch { expect: usize, actual: usize },
+    UndefinedLocal { index: usize },
+    LocalSetTypeMismatch { expect: ValType, actual: ValType },
+    UndefinedGlobal { index: usize },
+    GlobalSetTypeMismatch { expect: ValType, actual: ValType },
+    GlobalMustBeMutable { index: usize },
+    NoLinearMemoryDefined,
+    AlignmentLargerThanBitWidth { alignment: usize, bit_width: usize }
 }
 
-/// Error from executing and instantiating a Wasm module.
+/// Errors from executing and instantiating a Wasm module.
+#[derive(Debug)]
 pub enum ExecutionError {
 
 }

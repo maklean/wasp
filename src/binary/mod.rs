@@ -121,7 +121,7 @@ impl ParsedModule {
                         let actual_size = section_reader.pos() - start;
 
                         if actual_size != size {
-                            return Err(DecodingError::InvalidFuncCodeSize { expected: size, actual: actual_size })
+                            return Err(DecodingError::InvalidFuncCodeSize { expect: size, actual: actual_size })
                         }
                     }
 
@@ -133,7 +133,7 @@ impl ParsedModule {
 
             // if we haven't read the entire section, there's a size mismatch
             if !section_reader.eof() {
-                return Err(DecodingError::SectionSizeMismatch { expected: section_size as usize, actual: reader.pos() - start })
+                return Err(DecodingError::SectionSizeMismatch { expect: section_size as usize, actual: reader.pos() - start })
             }
 
             last_section = curr_section;

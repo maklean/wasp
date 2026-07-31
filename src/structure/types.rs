@@ -1,4 +1,4 @@
-use crate::{binary::reader::Reader, errors::DecodingError};
+use crate::{binary::reader::Reader, errors::{DecodingError, ValidationError}, validation::Validator};
 
 use super::instructions::Expr;
 
@@ -8,7 +8,8 @@ pub enum ValType {
     I32,
     I64,
     F32,
-    F64
+    F64,
+    Unknown,
 }
 
 impl ValType {
@@ -364,7 +365,7 @@ impl Import {
 /// Types of imports.
 #[derive(Debug, PartialEq)]
 pub enum ImportDesc {
-    /// Function index.
+    /// Function type index.
     Func(u32),
 
     /// Table type.
@@ -482,5 +483,21 @@ impl MemArg {
             align: reader.read_u32()?,
             offset: reader.read_u32()?
         })
+    }
+
+    pub(crate) fn validate(&self, validator: &mut Validator, bit_width: usize) -> Result<(), ValidationError> {
+        if validator.mems.is_empty() {
+            return Err(ValidationError::NoLinearMemoryDefined);
+        }
+
+        // alignment must not be larger than bit width divided by 8 (num of bytes)
+        let alignment = 2u64.pow(self.align);
+        let num_bytes = (bit_width / 8) as u64;
+
+        if alignment > num_bytes {
+            return Err(ValidationError::AlignmentLargerThanBitWidth { alignment: alignment as usize, bit_width });
+        }
+
+        Ok(())
     }
 }
