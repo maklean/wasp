@@ -11,13 +11,6 @@ pub struct Expr {
 }
 
 impl Expr {
-    /// Returns whether the expression is a constant expression.
-    pub fn is_const(&self) -> bool {
-        self.instructions
-            .iter()
-            .all(|i| matches!(i, Instr::I32Const(_) | Instr::I64Const(_) | Instr::F32Const(_) | Instr::F64Const(_) | Instr::GlobalGet(_)))
-    }
-
     /// Decodes an expression.
     pub fn decode(decoder: &mut Decoder) -> Result<Self, DecodeError> {
         Ok(Self { instructions: Instr::decode_sequence(decoder)? })
