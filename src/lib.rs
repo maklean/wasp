@@ -1,4 +1,5 @@
 mod binary;
-mod structure;
 
+pub mod structure;
 pub mod errors;
+pub mod module;

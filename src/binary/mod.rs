@@ -1,4 +1,3 @@
-use std::{fs, path::Path};
 use crate::{binary::reader::Reader, errors::DecodingError, structure::*};
 
 pub(crate) mod reader;
@@ -6,11 +5,11 @@ pub(crate) mod reader;
 /// Decodes a section that simply reserves space on its corresponding vector
 /// and calls DecodeType::decode(reader).
 macro_rules! decode_vec_section {
-    ($self:ident, $reader:expr, $field: ident, $decode_type:ty) => {{
+    ($self:ident, $reader:expr, $field: ident, $decode_type: ty, $decode_func: ident) => {{
         let count = $reader.read_u32()? as usize;
         $self.$field.reserve_exact(count);
         for _ in 0..count {
-            $self.$field.push(<$decode_type>::decode($reader)?);
+            $self.$field.push(<$decode_type>::$decode_func($reader)?);
         }
     }};
 }
@@ -18,7 +17,7 @@ macro_rules! decode_vec_section {
 
 /// Parsed/Decoded Wasm module.
 #[derive(Default)]
-pub(crate) struct ParsedModule {
+pub struct ParsedModule {
     /// Types of the functions in the module.
     pub types: Vec<FuncType>,
 
@@ -51,14 +50,6 @@ pub(crate) struct ParsedModule {
 }
 
 impl ParsedModule {
-    /// Decodes the Wasm module at the given path.
-    pub fn decode_from_file(path: impl AsRef<Path>) -> Result<Self, DecodingError> {
-        let bytes = fs::read(path)
-            .map_err(|e| DecodingError::Io(e))?;
-
-        Self::decode_from_bytes(&bytes)
-    }
-
     /// Decodes a Wasm module from its bytes.
     pub fn decode_from_bytes(bytes: &[u8]) -> Result<Self, DecodingError> {
         let mut reader = Reader::new(bytes);
@@ -103,10 +94,41 @@ impl ParsedModule {
             }
 
             match curr_section {
-                ModuleSection::Type => decode_vec_section!(self, &mut section_reader, types, FuncType),
-                ModuleSection::Import => decode_vec_section!(self, &mut section_reader, imports, Import),
-                ModuleSection::Custom => (),
-                _ => todo!()
+                ModuleSection::Type => decode_vec_section!(self, &mut section_reader, types, FuncType, decode),
+                ModuleSection::Import => decode_vec_section!(self, &mut section_reader, imports, Import, decode),
+                ModuleSection::Function => decode_vec_section!(self, &mut section_reader, funcs, Func, decode_type_idx),
+                ModuleSection::Table => decode_vec_section!(self, &mut section_reader, tables, Table, decode),
+                ModuleSection::Memory => decode_vec_section!(self, &mut section_reader, mems, Mem, decode),
+                ModuleSection::Global => decode_vec_section!(self, &mut section_reader, globals, Global, decode),
+                ModuleSection::Export => decode_vec_section!(self, &mut section_reader, exports, Export, decode),
+                ModuleSection::Start => self.start = Some(section_reader.read_u32()?),
+                ModuleSection::Element => decode_vec_section!(self, &mut section_reader, elem, Elem, decode),
+                ModuleSection::Code => {
+                    let num_func_bodies = section_reader.read_u32()? as usize;
+
+                    // the number of functions and function bodies should be the same.
+                    if num_func_bodies != self.funcs.len() {
+                        return Err(DecodingError::FunctionCodeCountMismatch { func_count: self.funcs.len(), code_count: num_func_bodies });
+                    }
+
+                    for func_idx in 0..num_func_bodies {
+                        let size = section_reader.read_u32()? as usize;
+                        let start = section_reader.pos();
+
+                        self.funcs[func_idx].decode_locals_body(&mut section_reader)?;
+
+                        // the code size should be the declared size
+                        let actual_size = section_reader.pos() - start;
+
+                        if actual_size != size {
+                            return Err(DecodingError::InvalidFuncCodeSize { expected: size, actual: actual_size })
+                        }
+                    }
+
+                    seen_code_section = true;
+                },
+                ModuleSection::Data => decode_vec_section!(self, &mut section_reader, data, Data, decode),
+                _ => unreachable!("All decodable sections have matching branches.")
             }
 
             // if we haven't read the entire section, there's a size mismatch
@@ -127,7 +149,7 @@ impl ParsedModule {
 }
 
 /// Wasm module section.
-#[derive(PartialEq, PartialOrd)]
+#[derive(PartialEq, PartialOrd, Debug)]
 pub enum ModuleSection {
     Custom,
     Type,
