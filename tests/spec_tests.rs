@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fs, path::Path, rc::Rc};
 
-use wasp::{errors::ExecuteError, executor::{ExternVal, ModuleInstance, Store, Val}, module::Module, validator::Validator};
+use wasp::{errors::ExecuteError, executor::{ExternVal, ModuleInstance, Store, Val}, module::Module};
 
 use crate::common::{Action, Command, Manifest, register_spectest, resolve_module, spectest_imports, vals_match};
 
@@ -34,7 +34,7 @@ fn run_spec_test(manifest_path: &Path) {
                 let module = Module::decode_from_bytes(&bytes)
                     .unwrap_or_else(|e| panic!("line {line}: failed to decode {filename}: {e:?}"));
 
-                Validator::validate(&module)
+                module.validate()
                     .unwrap_or_else(|e| panic!("line {line}: failed to validate {filename}: {e:?}"));
 
                 let imports = spectest_imports(&module, &spectest_exports, &registered_modules, filename, line).unwrap();
@@ -184,7 +184,7 @@ fn run_spec_test(manifest_path: &Path) {
                 let module = Module::decode_from_bytes(&bytes)
                     .unwrap_or_else(|e| panic!("line {line}: failed to decode {filename}: {e:?}"));
 
-                Validator::validate(&module)
+                module.validate()
                     .unwrap_or_else(|e| panic!("line {line}: failed to validate {filename}: {e:?}"));
 
                 let imports = spectest_imports(&module, &spectest_exports, &registered_modules, filename, line).unwrap();
@@ -213,7 +213,7 @@ fn run_spec_test(manifest_path: &Path) {
                 let module = Module::decode_from_bytes(&bytes)
                     .unwrap_or_else(|e| panic!("line {line}: failed to decode {filename}: {e:?}"));
 
-                let result = Validator::validate(&module);
+                let result = module.validate();
 
                 assert!(result.is_err(), "line {line}: expected module validation to fail, got success.");
             },
@@ -227,7 +227,7 @@ fn run_spec_test(manifest_path: &Path) {
                 let module = Module::decode_from_bytes(&bytes)
                     .unwrap_or_else(|e| panic!("line {line}: failed to decode {filename}: {e:?}"));
 
-                Validator::validate(&module)
+                module.validate()
                     .unwrap_or_else(|e| panic!("line {line}: failed to validate {filename}: {e:?}"));
 
                 // either the import lookup or module instantiation should fail

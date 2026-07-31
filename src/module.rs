@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::{decoder::Decoder, definitions::*, errors::DecodeError};
+use crate::{decoder::Decoder, definitions::*, errors::{DecodeError, ValidateError}, validator::Validator};
 
 /// Wasm module representation.
 #[derive(Default)]
@@ -69,6 +69,9 @@ impl Module {
 
         Ok(this)
     }
+
+    /// Validates the current module.
+    pub fn validate(&self) -> Result<(), ValidateError> { Validator::validate(self) }
 }
 
 // Specific decoding functions.
