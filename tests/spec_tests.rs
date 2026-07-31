@@ -31,7 +31,7 @@ fn run_spec_test(manifest_path: &Path) {
                 let bytes = fs::read(dir.join(filename))
                     .unwrap_or_else(|e| panic!("line {line}: failed to read {filename}: {e}"));
                 
-                let module = Module::decode(&bytes)
+                let module = Module::decode_from_bytes(&bytes)
                     .unwrap_or_else(|e| panic!("line {line}: failed to decode {filename}: {e:?}"));
 
                 Validator::validate(&module)
@@ -181,7 +181,7 @@ fn run_spec_test(manifest_path: &Path) {
                 let bytes = fs::read(dir.join(filename))
                     .unwrap_or_else(|e| panic!("line {line}: failed to read {filename}: {e}"));
                 
-                let module = Module::decode(&bytes)
+                let module = Module::decode_from_bytes(&bytes)
                     .unwrap_or_else(|e| panic!("line {line}: failed to decode {filename}: {e:?}"));
 
                 Validator::validate(&module)
@@ -199,7 +199,7 @@ fn run_spec_test(manifest_path: &Path) {
                 let bytes = fs::read(dir.join(filename))
                     .unwrap_or_else(|e| panic!("line {line}: failed to read {filename}: {e}"));
                 
-                let result = Module::decode(&bytes);
+                let result = Module::decode_from_bytes(&bytes);
                 
                 assert!(result.is_err(), "line {line}: expected module decoding to fail, got success.");
             },
@@ -210,7 +210,7 @@ fn run_spec_test(manifest_path: &Path) {
                 let bytes = fs::read(dir.join(filename))
                     .unwrap_or_else(|e| panic!("line {line}: failed to read {filename}: {e}"));
                 
-                let module = Module::decode(&bytes)
+                let module = Module::decode_from_bytes(&bytes)
                     .unwrap_or_else(|e| panic!("line {line}: failed to decode {filename}: {e:?}"));
 
                 let result = Validator::validate(&module);
@@ -224,7 +224,7 @@ fn run_spec_test(manifest_path: &Path) {
                 let bytes = fs::read(dir.join(filename))
                     .unwrap_or_else(|e| panic!("line {line}: failed to read {filename}: {e}"));
                 
-                let module = Module::decode(&bytes)
+                let module = Module::decode_from_bytes(&bytes)
                     .unwrap_or_else(|e| panic!("line {line}: failed to decode {filename}: {e:?}"));
 
                 Validator::validate(&module)

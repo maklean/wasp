@@ -1,9 +1,8 @@
+use std::path::Path;
+
 use crate::{decoder::Decoder, definitions::*, errors::DecodeError};
 
-const MAGIC_HEADER: &[u8; 4] = b"\0asm";
-const WASM_1_0_SPEC_VERSION: &[u8; 4] = &[1, 0, 0, 0];
-
-/// Standalone module representation.
+/// Wasm module representation.
 #[derive(Default)]
 pub struct Module {
     /// Types of the functions in the module.
@@ -38,16 +37,28 @@ pub struct Module {
 }
 
 impl Module {
-    pub fn decode(bytes: &[u8]) -> Result<Self, DecodeError> {
+    const MAGIC_HEADER: &[u8; 4] = b"\0asm";
+    const WASM_1_0_SPEC_VERSION: &[u8; 4] = &[1, 0, 0, 0];
+
+    /// Decodes the Wasm module at the given path.
+    pub fn decode_from_file(path: impl AsRef<Path>) -> Result<Self, DecodeError> {
+        let bytes = std::fs::read(path)
+            .map_err(|_| DecodeError::Io)?;
+
+        Self::decode_from_bytes(&bytes)
+    }
+
+    /// Decodes a Wasm module from a slice of bytes.
+    pub fn decode_from_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
         let mut decoder = Decoder::new(bytes);
 
         // read magic header
-        if decoder.read_bytes(MAGIC_HEADER.len())? != MAGIC_HEADER {
+        if decoder.read_bytes(Self::MAGIC_HEADER.len())? != Self::MAGIC_HEADER {
             return Err(DecodeError::InvalidMagicHeader);
         }
 
         // read wasm specification version
-        if decoder.read_bytes(WASM_1_0_SPEC_VERSION.len())? != WASM_1_0_SPEC_VERSION {
+        if decoder.read_bytes(Self::WASM_1_0_SPEC_VERSION.len())? != Self::WASM_1_0_SPEC_VERSION {
             return Err(DecodeError::InvalidSpecificationVersion);
         }
 
@@ -58,7 +69,10 @@ impl Module {
 
         Ok(this)
     }
+}
 
+// Specific decoding functions.
+impl Module {
     /// Decodes each section in the module.
     fn decode_sections(&mut self, decoder: &mut Decoder) -> Result<(), DecodeError> {
         let mut last_section_id = Section::Custom;
