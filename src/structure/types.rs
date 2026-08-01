@@ -56,6 +56,15 @@ impl FuncType {
 
         Ok(Self { params, results })
     }
+
+    pub(crate) fn validate(&self) -> Result<(), ValidationError> {
+        // At most 1 result is allowed in Wasm 1.0
+        if self.results.len() > 1 {
+            return Err(ValidationError::InvalidFuncTypeResultCount { result_count: self.results.len() });
+        }
+
+        Ok(())
+    }
 }
 
 /// Wasm module function.
@@ -104,6 +113,25 @@ impl Func {
 
         Ok(())
     }
+
+    pub(crate) fn validate(&self, validator: &mut Validator) -> Result<(), ValidationError> {
+        let func_type = validator.types
+            .get(self.type_idx as usize)
+            .ok_or(ValidationError::UndefinedType { index: self.type_idx as usize })?;
+
+        // set locals and validate function body
+        validator.locals = func_type.params
+            .clone()
+            .into_iter()
+            .chain(
+                self.locals.clone().into_iter()
+            )
+            .collect();
+        
+        self.body.validate(validator, func_type.results.clone())?;
+
+        Ok(())
+    }
 }
 
 /// Wasm table.
@@ -118,6 +146,10 @@ impl Table {
             table_type: TableType::decode(reader)?
         })
     }
+
+    pub(crate) fn validate(&self) -> Result<(), ValidationError> {
+        self.table_type.validate()
+    }
 }
 
 /// Description/schema of a table.
@@ -131,11 +163,18 @@ pub struct TableType {
 }
 
 impl TableType {
+    /// The range which the limit must be valid within.
+    const TABLE_MAX: u64 = 4294967296;
+
     fn decode(reader: &mut Reader) -> Result<Self, DecodingError> {
         Ok(Self {
             elem_type: ElemType::decode(reader)?,
             limits: Limits::decode(reader)?,
         })
+    }
+
+    fn validate(&self) -> Result<(), ValidationError> {
+        self.limits.validate(Self::TABLE_MAX)
     }
 }
 
@@ -164,10 +203,17 @@ pub struct Mem {
 }
 
 impl Mem {
+    /// The maximum number of pages a linear memory is allowed to span.
+    pub const MEMORY_MAX: u64 = 65536;
+
     pub(crate) fn decode(reader: &mut Reader) -> Result<Self, DecodingError> {
         Ok(Self {
             mem_type: Limits::decode(reader)?
         })
+    }
+
+    pub(crate) fn validate(&self) -> Result<(), ValidationError> {
+        self.mem_type.validate(Self::MEMORY_MAX)
     }
 }
 
@@ -197,6 +243,27 @@ impl Limits {
             _ => Err(DecodingError::InvalidLimits { actual })
         }
     }
+
+    fn validate(&self, k: u64) -> Result<(), ValidationError> {
+        // min shouldn't be larger than k
+        if self.min as u64 > k {
+            return Err(ValidationError::LimitsMinLargerThanK { min: self.min as usize, k: k as usize });
+        }
+
+        if let Some(max) = self.max {
+            // max must not be larger than k
+            if max as u64 > k {
+                return Err(ValidationError::LimitsMaxLargerThanK { max: max as usize, k: k as usize })
+            }
+
+            // min must not be larger than max
+            if max < self.min {
+                return Err(ValidationError::LimitsMinLargerThanMax { min: self.min as usize, max: max as usize });
+            }
+        }
+
+        Ok(())
+    }
 }
 
 /// Wasm global variable.
@@ -214,6 +281,11 @@ impl Global {
             global_type: GlobalType::decode(reader)?,
             init: Expr::decode(reader)?
         })
+    }
+
+    pub(crate) fn validate(&self, validator: &mut Validator) -> Result<(), ValidationError> {
+        // global type is already valid.
+        self.init.validate_const_expr(validator, Some(self.global_type.val_type))
     }
 }
 
@@ -291,6 +363,26 @@ impl Elem {
             init
         })
     }
+
+    pub(crate) fn validate(&self, validator: &mut Validator) -> Result<(), ValidationError> {
+        let table_type = validator.tables
+            .get(self.table_idx as usize)
+            .ok_or(ValidationError::UndefinedTable { index: self.table_idx as usize })?;
+
+        table_type.validate()?;
+
+        // offset result has to be an i32/index to start writing at in table
+        self.offset.validate_const_expr(validator, Some(ValType::I32))?;
+
+        // every function has to be defined
+        for func_idx in &self.init {
+            if validator.funcs.len() <= *func_idx as usize {
+                return Err(ValidationError::UndefinedFunction { index: *func_idx as usize });
+            }
+        }
+
+        Ok(())
+    }
 }
 
 /// Wasm data segment.
@@ -323,6 +415,17 @@ impl Data {
             offset,
             init
         })
+    }
+
+    pub(crate) fn validate(&self, validator: &mut Validator) -> Result<(), ValidationError> {
+        if validator.mems.len() <= self.mem_idx as usize {
+            return Err(ValidationError::UndefinedLinearMemory { index: self.mem_idx as usize });
+        }
+
+        // offset result has to be an i32/index to start writing at in linear memory
+        self.offset.validate_const_expr(validator, Some(ValType::I32))?;
+
+        Ok(())
     }
 }
 
@@ -360,6 +463,10 @@ impl Import {
             desc: ImportDesc::decode(reader)?
         })
     }
+
+    pub(crate) fn validate(&self, validator: &mut Validator) -> Result<(), ValidationError> {
+        self.desc.validate(validator)
+    }
 }
 
 /// Types of imports.
@@ -390,6 +497,25 @@ impl ImportDesc {
             _ => Err(DecodingError::InvalidImportDesc { actual })
         }
     }
+
+    pub(crate) fn validate(&self, validator: &mut Validator) -> Result<(), ValidationError> {
+        match self {
+            Self::Func(type_idx) => {
+                if validator.types.len() <= *type_idx as usize {
+                    return Err(ValidationError::UndefinedType { index: *type_idx as usize });
+                }
+            },
+
+            Self::Table(table_type) => table_type.validate()?,
+
+            Self::Mem(mem_type) => mem_type.validate(Mem::MEMORY_MAX)?,
+
+            // Global types are already valid.
+            _ => ()
+        }
+
+        Ok(())
+    }
 }
 
 /// Wasm export.
@@ -414,6 +540,10 @@ impl Export {
             name, 
             desc: ExportDesc::decode(reader)?,
         })
+    }
+
+    pub(crate) fn validate(&self, validator: &mut Validator) -> Result<(), ValidationError> {
+        self.desc.validate(validator)
     }
 }
 
@@ -443,6 +573,36 @@ impl ExportDesc {
             0x03 => Ok(Self::Global(reader.read_u32()?)),
             _ => Err(DecodingError::InvalidExportDesc { actual })
         }
+    }
+
+    pub(crate) fn validate(&self, validator: &mut Validator) -> Result<(), ValidationError> {
+        match self {
+            Self::Func(func_idx) => {
+                if validator.funcs.len() <= *func_idx as usize {
+                    return Err(ValidationError::UndefinedFunction { index: *func_idx as usize });
+                }
+            }
+
+            Self::Table(table_idx) => {
+                if validator.tables.len() <= *table_idx as usize {
+                    return Err(ValidationError::UndefinedTable { index: *table_idx as usize });
+                }
+            }
+
+            Self::Mem(mem_idx) => {
+                if validator.mems.len() <= *mem_idx as usize {
+                    return Err(ValidationError::UndefinedLinearMemory { index: *mem_idx as usize });
+                }
+            }
+
+            Self::Global(global_idx) => {
+                if validator.globals.len() <= *global_idx as usize {
+                    return Err(ValidationError::UndefinedGlobal { index: *global_idx as usize });
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -477,7 +637,7 @@ impl BlockType {
 }
 
 /// Wasm memory argument.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct MemArg {
     /// Alignment of address.
     pub align: u32,

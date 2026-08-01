@@ -1,4 +1,4 @@
-use crate::{binary::reader::Reader, errors::{DecodingError, ValidationError}, structure::{Instr::LocalSet, Mutability, ValType, types::{BlockType, MemArg}}, validation::Validator};
+use crate::{binary::reader::Reader, errors::{DecodingError, ValidationError}, structure::{ImportDesc, Mutability, ValType, types::{BlockType, MemArg}}, validation::Validator};
 
 /// Wasm expression.
 #[derive(Default, Debug, PartialEq)]
@@ -13,10 +13,79 @@ impl Expr {
             instructions: Instr::decode_sequence(reader)?
         })
     }
+
+    /// Validates the expression as a function body.
+    pub(crate) fn validate(&self, validator: &mut Validator, end_types: Vec<ValType>) -> Result<(), ValidationError> {
+        validator.opds.clear();
+        validator.ctrls.clear();
+
+        validator.push_ctrl(end_types.clone(), end_types);
+
+        for instr in &self.instructions {
+            instr.validate(validator)?;
+        }
+
+        validator.pop_ctrl()?;
+
+        Ok(())
+    }
+
+    /// Validates the expression as a constant expression.
+    pub(crate) fn validate_const_expr(&self, validator: &mut Validator, end_type: Option<ValType>) -> Result<(), ValidationError> {
+        validator.opds.clear();
+        validator.ctrls.clear();
+
+        let end_types: Vec<ValType> = end_type.into_iter().collect();
+
+        validator.push_ctrl(end_types.clone(), end_types);
+
+        for instr in &self.instructions {
+            match instr {
+                Instr::I32Const(_) | Instr::I64Const(_)
+                | Instr::F32Const(_) | Instr::F64Const(_)
+                => instr.validate(validator)?,
+                
+                Instr::GlobalGet(global_idx) => {
+                    let global_idx = *global_idx as usize;
+
+                    /*
+                        the global used to initialize the const expr., must be an imported global.
+                        imported globals come first in the list of globals, so any index in [0, num_imported_globals-1]
+                        is fine.
+                    */
+                    let num_imported_globals = validator.module.imports
+                        .iter()
+                        .filter(|import| matches!(import.desc, ImportDesc::Global(_)))
+                        .count();
+
+                    if num_imported_globals <= global_idx {
+                        return Err(ValidationError::InvalidNonImportedGlobal { index: global_idx });
+                    }
+
+                    let global = validator.globals
+                        .get(global_idx)
+                        .ok_or(ValidationError::UndefinedGlobal { index: global_idx })?; // shouldn't err
+
+                    // ensure global is const
+                    if global.mutability != Mutability::Const {
+                        return Err(ValidationError::NonConstantInstruction { actual: instr.clone() });
+                    }
+
+                    instr.validate(validator)?
+                }
+
+                _ => Err(ValidationError::NonConstantInstruction { actual: instr.clone() })?
+            }
+        }
+
+        validator.pop_ctrl()?;
+
+        Ok(())
+    }
 }
 
 /// Wasm instructions.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Instr {
     // Control Instructions
     Unreachable,

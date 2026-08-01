@@ -97,7 +97,81 @@ impl<'a> Validator<'a> {
     pub fn validate(module: &'a ParsedModule) -> Result<(), ValidationError> {
         let mut this = Self::new(module);
 
-        todo!()
+        // validate functions
+        for func in &module.funcs {
+            func.validate(&mut this)?;
+        }
+
+        // validate tables
+        for table in &module.tables {
+            table.validate()?;
+        }
+
+        // validate linear memories
+        for mem in &module.mems {
+            mem.validate()?;
+        }
+
+        // validate globals
+        for global in &module.globals {
+            global.validate(&mut this)?;
+        }
+
+        // validate element segments
+        for elem in &module.elem {
+            elem.validate(&mut this)?
+        }
+
+        // validate data segments
+        for data in &module.data {
+            data.validate(&mut this)?;
+        }
+
+        // validate start function if it exists
+        if let Some(start_func_idx) = module.start {
+            let start_func_idx = start_func_idx as usize;
+
+            let func = this.funcs
+                .get(start_func_idx)
+                .ok_or(ValidationError::UndefinedFunction { index: start_func_idx })?;
+
+            // params and results have to be empty for the start function to be valid
+            if !func.params.is_empty() || !func.results.is_empty() {
+                return Err(ValidationError::InvalidStartFunction { params: func.params.clone(), results: func.results.clone() });
+            }
+        }
+
+        // validate exports + check for unique names
+        let mut seen_names = std::collections::HashSet::new();
+
+        for export in &module.exports {
+            if !seen_names.insert(&export.name) {
+                return Err(ValidationError::DuplicateExportName { name: export.name.clone() });
+            }
+
+            export.validate(&mut this)?;
+        }
+
+        // validate imports
+        for import in &module.imports {
+            import.validate(&mut this)?;
+        }
+
+        // validate functypes
+        for func_type in &module.types {
+            func_type.validate()?;
+        }
+
+        // check for too many tables and mems
+        if this.tables.len() > 1 {
+            return Err(ValidationError::TooManyTables { count: this.tables.len() });
+        }
+        
+        if this.mems.len() > 1 {
+            return Err(ValidationError::TooManyMems { count: this.mems.len() });
+        }
+
+        Ok(())
     }
 
     /// Pushes the given value type onto the operand stack.

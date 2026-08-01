@@ -1,6 +1,6 @@
 use std::io;
 
-use crate::{binary::ModuleSection, structure::ValType};
+use crate::{binary::ModuleSection, structure::{Instr, ValType}};
 
 /// Errors from decoding a Wasm module.
 #[derive(Debug)]
@@ -52,7 +52,19 @@ pub enum ValidationError {
     InvalidLabelIndex { ctrl_frame_count: usize, index: usize },
     ExpectedMatchingLabelTypes { expect: Vec<ValType>, actual: Vec<ValType> },
     UndefinedFunction { index: usize },
-    UndefinedType { index: usize }
+    UndefinedType { index: usize },
+    NonConstantInstruction { actual: Instr },
+    InvalidNonImportedGlobal { index: usize },
+    InvalidFuncTypeResultCount { result_count: usize },
+    LimitsMinLargerThanK { min: usize, k: usize },
+    LimitsMaxLargerThanK { max: usize, k: usize },
+    LimitsMinLargerThanMax { min: usize, max: usize },
+    UndefinedTable { index: usize },
+    UndefinedLinearMemory { index: usize },
+    InvalidStartFunction { params: Vec<ValType>, results: Vec<ValType> },
+    DuplicateExportName { name: String },
+    TooManyMems { count: usize },
+    TooManyTables { count: usize }
 }
 
 /// Errors from executing and instantiating a Wasm module.
