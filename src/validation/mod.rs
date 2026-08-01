@@ -175,7 +175,8 @@ impl<'a> Validator<'a> {
     }
 
     /// Exits the current structured control construct. Performs a type-check on the
-    /// operand stack for the expected end types.
+    /// operand stack for the expected end types. Returns the end types of the control
+    /// construct.
     pub fn pop_ctrl(&mut self) -> Result<Vec<ValType>, ValidationError> {
         let frame = self.ctrls.last().cloned()
             .ok_or(ValidationError::ExpectedControlFrame)?;
@@ -191,6 +192,18 @@ impl<'a> Validator<'a> {
         self.ctrls.pop();
 
         Ok(frame.end_types)
+    }
+
+    /// Retrieves the control frame (starting from the top of the stack).
+    pub fn get_ctrl(&self, index: u32) -> Result<&CtrlFrame, ValidationError> {
+        let index = index as usize;
+
+        if self.ctrls.len() <= index {
+            return Err(ValidationError::InvalidLabelIndex { ctrl_frame_count: self.ctrls.len(), index });
+        }
+
+        Ok(self.ctrls.get(self.ctrls.len()-1-index)
+            .expect("control frame should exist."))
     }
 
     /// Declares the current control frame as unreachable and truncates 
@@ -253,7 +266,7 @@ impl<'a> Validator<'a> {
 #[derive(Clone)]
 pub struct CtrlFrame {
     /// Types expected on the operand stack when we branch to this construct.
-    label_types: Vec<ValType>,
+    pub label_types: Vec<ValType>,
 
     /// Types expected on the operand stack when we exit this construct.
     end_types: Vec<ValType>,

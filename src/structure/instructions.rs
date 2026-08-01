@@ -618,8 +618,154 @@ impl Instr {
                     validator.pop_opd_expect(ValType::I32)?;
                     validator.push_opd(ValType::I32);
                 }
-                
-            _ => todo!()
+            
+            // Control Instructions
+                Self::Nop => (),
+
+                Self::Unreachable => validator.unreachable()?,
+
+                Self::Block(block_type, instructions) => {
+                    let end_types: Vec<ValType> = (*block_type).into();
+
+                    // label and end types are the same for block control constructs
+                    validator.push_ctrl(end_types.clone(), end_types);
+
+                    // validate body
+                    for instr in instructions {
+                        instr.validate(validator)?;
+                    }
+
+                    let end_types = validator.pop_ctrl()?;
+                    validator.push_opds(end_types);
+                },
+
+                Self::Loop(block_type, instructions) => {
+                    let end_types: Vec<ValType> = (*block_type).into();
+
+                    // label types are empty for loops
+                    validator.push_ctrl(vec![], end_types);
+
+                    // validate body
+                    for instr in instructions {
+                        instr.validate(validator)?;
+                    }
+
+                    let end_types = validator.pop_ctrl()?;
+                    validator.push_opds(end_types);
+                },
+
+                Self::If(block_type, then_block, else_block) => {
+                    let end_types: Vec<ValType> = (*block_type).into();
+
+                    // pop condition
+                    validator.pop_opd_expect(ValType::I32)?;
+
+                    // both the 'then' and 'else' block are expected to produce the end types
+                    for block in [then_block, else_block] {
+                        // both blocks have the same label and end types
+                        validator.push_ctrl(end_types.clone(), end_types.clone());
+
+                        // validate instructions in blocks
+                        for instr in block {
+                            instr.validate(validator)?;
+                        }
+
+                        validator.pop_ctrl()?;
+                    }
+
+                    validator.push_opds(end_types);
+                },
+
+                Self::Br(index) => {
+                    // branch to the targetted control frame and expect the label types on the opd stack
+                    let target_ctrl_frame = validator.get_ctrl(*index)?;
+                    
+                    validator.pop_opds(target_ctrl_frame.label_types.clone())?;
+
+                    // rest of the control frame is dead code
+                    validator.unreachable()?;
+                },
+
+                Self::BrIf(index) => {
+                    // pop condition
+                    validator.pop_opd_expect(ValType::I32)?;
+
+                    // branch to the targetted control frame and expect the label types on the opd stack
+                    let target_ctrl_frame = validator.get_ctrl(*index)?;
+
+                    let label_types = target_ctrl_frame.label_types.clone();
+                    
+                    validator.pop_opds(label_types.clone())?;
+
+                    // push opds for fallthrough path since it could still run
+                    validator.push_opds(label_types);
+                },
+
+                Self::BrTable(label_indices, fallback_index) => {
+                    // pop selector index
+                    validator.pop_opd_expect(ValType::I32)?;
+
+                    let fallback_ctrl_frame = validator.get_ctrl(*fallback_index)?;
+
+                    let label_types = fallback_ctrl_frame.label_types.clone();
+
+                    for &index in label_indices {
+                        let ctrl_frame = validator.get_ctrl(index)?;
+
+                        // all target labels must have the same label type as the fallback frame 
+                        if ctrl_frame.label_types != label_types {
+                            return Err(ValidationError::ExpectedMatchingLabelTypes {
+                                expect: label_types,
+                                actual: ctrl_frame.label_types.clone()
+                            });
+                        }
+                    }
+
+                    // branch to one of the labels
+                    validator.pop_opds(label_types)?;
+                    validator.unreachable()?;
+                },
+
+                Self::Return => Self::Br(0).validate(validator)?,
+
+                Self::Call(func_idx) => {
+                    let func_idx = *func_idx as usize;
+
+                    let func_type = validator.funcs
+                        .get(func_idx)
+                        .ok_or(ValidationError::UndefinedFunction { index: func_idx })?;
+
+                    let params = func_type.params.clone();
+                    let results = func_type.results.clone();
+
+                    // pop params, push results
+                    validator.pop_opds(params)?;
+                    validator.push_opds(results);
+                },
+
+                Self::CallIndirect(type_idx) => {
+                    let type_idx = *type_idx as usize;
+
+                    if validator.tables.is_empty() {
+                        return Err(ValidationError::NoTableDefined);
+                    }
+
+                    // pop table index off
+                    validator.pop_opd_expect(ValType::I32)?;
+
+                    // there should be a check for TableType.elem_type being funcref, but since it's the only variant, it's already valid
+
+                    let func_type = validator.types
+                        .get(type_idx)
+                        .ok_or(ValidationError::UndefinedType { index: type_idx })?;
+
+                    let params = func_type.params.clone();
+                    let results = func_type.results.clone();
+
+                    // pop params, push results
+                    validator.pop_opds(params)?;
+                    validator.push_opds(results);
+                }
         }
         
         Ok(())

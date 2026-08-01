@@ -447,13 +447,22 @@ impl ExportDesc {
 }
 
 /// Signature of Wasm structured control instructions (block/loop/if/else).
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum BlockType {
     /// Returns nothing.
     Empty,
 
     /// Returns a single value.
     Val(ValType)
+}
+
+impl Into<Vec<ValType>> for BlockType {
+    fn into(self) -> Vec<ValType> {
+        match self {
+            Self::Empty => vec![],
+            Self::Val(v) => vec![v]
+        }
+    }
 }
 
 impl BlockType {

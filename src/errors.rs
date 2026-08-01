@@ -47,7 +47,12 @@ pub enum ValidationError {
     GlobalSetTypeMismatch { expect: ValType, actual: ValType },
     GlobalMustBeMutable { index: usize },
     NoLinearMemoryDefined,
-    AlignmentLargerThanBitWidth { alignment: usize, bit_width: usize }
+    NoTableDefined,
+    AlignmentLargerThanBitWidth { alignment: usize, bit_width: usize },
+    InvalidLabelIndex { ctrl_frame_count: usize, index: usize },
+    ExpectedMatchingLabelTypes { expect: Vec<ValType>, actual: Vec<ValType> },
+    UndefinedFunction { index: usize },
+    UndefinedType { index: usize }
 }
 
 /// Errors from executing and instantiating a Wasm module.
