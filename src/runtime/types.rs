@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{errors::ExecutionError, runtime::{ModuleInstance, Store}, structure::{Func, FuncType, Mutability, ValType}};
+use crate::{errors::ExecutionError, runtime::{ModuleInstance, Store}, structure::{Func, FuncType, MemArg, Mutability, ValType}};
 
 /// Wasm Address.
 pub type Addr = usize;

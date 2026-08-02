@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{errors::{ExecutionError, TrapReason}, runtime::{FuncInstance, Store, Val}, structure::{FuncType, Instr}};
+use crate::{errors::{ExecutionError, TrapReason}, runtime::{FuncInstance, ModuleInstance, Store, Val}, structure::{FuncType, Instr, MemArg}};
 
 /// Wasm module instance executor.
 #[derive(Default)]
@@ -390,6 +390,73 @@ impl Executor {
         self.push_value(f(v)?);
         Ok(())
     }
+
+    /// Loads `N` bits from the only defined memory instance into a static 8-byte buffer.
+    pub(crate) fn mem_load_bytes(&mut self, n: usize, arg: &MemArg, module: Rc<ModuleInstance>, store: &Store) -> Result<[u8; 8], ExecutionError> {
+        // linear memory is guaranteed to exist due to validation
+        let mem = &store.mems[module.mem_addrs[0]];
+
+        let num_bytes = n / 8;
+        let base_addr = self.pop_value()?.as_i32();
+
+        let ea = (base_addr as u32).checked_add(arg.offset)
+            .ok_or(ExecutionError::Trapped(TrapReason::OutOfBoundsMemoryAccess {
+                addr: base_addr as usize, len: num_bytes, mem_size: mem.data.len()
+            }))?;
+
+        let end = (ea as usize).checked_add(num_bytes)
+            .ok_or(ExecutionError::Trapped(TrapReason::OutOfBoundsMemoryAccess {
+                addr: ea as usize, len: num_bytes, mem_size: mem.data.len()
+            }))?;
+
+        if end > mem.data.len() {
+            return Err(ExecutionError::Trapped(TrapReason::OutOfBoundsMemoryAccess {
+                addr: ea as usize, len: num_bytes, mem_size: mem.data.len()
+            }));
+        }
+
+        let ea = ea as usize;
+        
+        // copy bytes into buffer
+        let mut bytes = [0u8; 8];
+        bytes[..num_bytes].copy_from_slice(&mem.data[ea..ea + num_bytes]);
+
+        Ok(bytes)
+    }
+
+    /// Stores `N` bits into the only defined memory instance from a 8-byte constant `c`.
+    pub(crate) fn mem_store_bytes(&mut self, n: usize, arg: &MemArg, c: i64, module: Rc<ModuleInstance>, store: &mut Store) -> Result<(), ExecutionError> {
+        // linear memory is guaranteed to exist due to validation
+        let mem = &mut store.mems[module.mem_addrs[0]];
+
+        let num_bytes = n / 8;
+        let base_addr = self.pop_value()?.as_i32();
+
+        let ea = (base_addr as u32).checked_add(arg.offset)
+            .ok_or(ExecutionError::Trapped(TrapReason::OutOfBoundsMemoryAccess {
+                addr: base_addr as usize, len: num_bytes, mem_size: mem.data.len()
+            }))?;
+
+        let end = (ea as usize).checked_add(num_bytes)
+            .ok_or(ExecutionError::Trapped(TrapReason::OutOfBoundsMemoryAccess {
+                addr: ea as usize, len: num_bytes, mem_size: mem.data.len()
+            }))?;
+
+        if end > mem.data.len() {
+            return Err(ExecutionError::Trapped(TrapReason::OutOfBoundsMemoryAccess {
+                addr: ea as usize, len: num_bytes, mem_size: mem.data.len()
+            }));
+        }
+
+        let ea = ea as usize;
+
+        // store bytes from constant in memory
+        let bytes = c.to_le_bytes();
+        mem.data[ea..end].copy_from_slice(&bytes[..num_bytes]);
+
+        Ok(())
+    }
+    
 }
 
 /// Function call frame.

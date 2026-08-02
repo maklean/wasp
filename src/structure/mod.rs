@@ -11,4 +11,5 @@ pub use types::{
     Elem, Data,
     Import, ImportDesc,
     Export, ExportDesc,
+    MemArg
 };
