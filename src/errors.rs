@@ -1,6 +1,6 @@
 use std::io;
 
-use crate::{binary::ModuleSection, structure::{Instr, ValType}};
+use crate::{binary::ModuleSection, structure::{FuncType, Instr, ValType}};
 
 /// Errors from decoding a Wasm module.
 #[derive(Debug)]
@@ -70,5 +70,16 @@ pub enum ValidationError {
 /// Errors from executing and instantiating a Wasm module.
 #[derive(Debug)]
 pub enum ExecutionError {
+    UnexpectedStackUnderflow,
+    Trapped(TrapReason),
+}
 
+/// Reasons for trapping.
+#[derive(Debug)]
+pub enum TrapReason {
+    Unreachable,
+    CallStackExhausted,
+    UndefinedElement { index: usize },
+    UninitializedElement { index: usize },
+    IndirectCallTypeMismatch { expect: FuncType, actual: FuncType }
 }

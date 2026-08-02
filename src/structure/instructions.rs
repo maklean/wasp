@@ -1,4 +1,6 @@
-use crate::{binary::reader::Reader, errors::{DecodingError, ValidationError}, structure::{ImportDesc, Mutability, ValType, types::{BlockType, MemArg}}, validation::Validator};
+use std::rc::Rc;
+
+use crate::{binary::reader::Reader, errors::{DecodingError, ExecutionError, TrapReason, ValidationError}, execution::Executor, runtime::{Addr, FuncInstance::{self, Host}, ModuleInstance, Store, Val}, structure::{ImportDesc, Mutability, ValType, types::{BlockType, MemArg}}, validation::Validator};
 
 /// Wasm expression.
 #[derive(Default, Debug, PartialEq)]
@@ -81,6 +83,18 @@ impl Expr {
         validator.pop_ctrl()?;
 
         Ok(())
+    }
+
+    /// Executes the expression as a constant expression.
+    pub(crate) fn execute_const_expr(&self, store: &Store, imported_global_addrs: &[Addr]) -> Val {
+        match &self.instructions[0] {
+            Instr::I32Const(v) => Val::I32(*v),
+            Instr::I64Const(v) => Val::I64(*v),
+            Instr::F32Const(v) => Val::F32(*v),
+            Instr::F64Const(v) => Val::F64(*v),
+            Instr::GlobalGet(global_idx) => store.globals[imported_global_addrs[*global_idx as usize]].value,
+            _ => unreachable!("expression should be constant.")
+        }
     }
 }
 
@@ -795,7 +809,7 @@ impl Instr {
                     validator.unreachable()?;
                 },
 
-                Self::Return => Self::Br(0).validate(validator)?,
+                Self::Return => Self::Br(validator.ctrls.len() as u32 - 1).validate(validator)?,
 
                 Self::Call(func_idx) => {
                     let func_idx = *func_idx as usize;
@@ -838,6 +852,130 @@ impl Instr {
         }
         
         Ok(())
+    }
+
+    /// Executes the sequence of instructions.
+    /// The level is the current 
+    pub(crate) fn execute_sequence(
+        instructions: &[Instr], 
+        executor: &mut Executor, 
+        level: usize,
+        store: &mut Store,
+        module: Rc<ModuleInstance>
+    ) -> Result<Option<usize>, ExecutionError> {
+        for instr in instructions {
+            match instr {
+                // Control Instructions
+                Instr::Unreachable => return Err(ExecutionError::Trapped(TrapReason::Unreachable)),
+                Instr::Nop => {},
+                Instr::Block(block_type, body) => {
+                    let prev_block = executor.enter_block(block_type.arity());
+
+                    let branch_target = Self::execute_sequence(body, executor, level + 1, store, Rc::clone(&module))?;
+
+                    // check if we're unwinding past this block
+                    let unwinding = branch_target.is_some_and(|target| target <= level);
+                    
+                    executor.exit_block(prev_block, unwinding);
+
+                    // if we're unwinding past this level, we should propagate the branch target up
+                    if unwinding {
+                        return Ok(branch_target);
+                    }
+                },
+                Instr::Loop(block_type, body) => {
+                    let prev_block = executor.enter_block(block_type.arity());
+                    let loop_block_level = level + 1; // the level the loop body executes at
+
+                    loop {
+                        let branch_target = Self::execute_sequence(body, executor, loop_block_level, store, Rc::clone(&module))?;
+
+                        // if the branch target is the loop's body, we loop again
+                        if branch_target.is_some_and(|target| target == loop_block_level) {
+                            continue;
+                        }
+
+                        let unwinding = branch_target.is_some_and(|target| target <= level);
+                        
+                        executor.exit_block(prev_block, unwinding);
+
+                        if unwinding {
+                            return Ok(branch_target);
+                        }
+
+                        break; // loops only loop through branches.
+                    }
+                },
+                Instr::If(block_type, then_block, else_block) => {
+                    let condition_is_true = executor.pop_value()?.as_i32() != 0;
+                    let prev_block = executor.enter_block(block_type.arity());
+
+                    // execute corresponding block based on condition
+                    let branch_target = if condition_is_true {
+                        Self::execute_sequence(then_block, executor, level + 1, store, Rc::clone(&module))?
+                    } else {
+                        Self::execute_sequence(else_block, executor, level + 1, store, Rc::clone(&module))?
+                    };
+
+                    let unwinding = branch_target.is_some_and(|target| target <= level);
+                    executor.exit_block(prev_block, unwinding);
+
+                    if unwinding {
+                        return Ok(branch_target);
+                    }
+                },
+                Instr::Br(label_idx) => return Ok(Some(level - *label_idx as usize)),
+                Instr::BrIf(label_idx) => {
+                    let condition_is_true = executor.pop_value()?.as_i32() != 0;
+
+                    if condition_is_true {
+                        return Ok(Some(level - *label_idx as usize));
+                    }
+                },
+                Instr::BrTable(label_indices, fallback_label_idx) => {
+                    let selector_idx = executor.pop_value()?.as_i32() as usize;
+
+                    // branch to label index at selector index if it exists in the array, otherwise use the fallback.
+                    if selector_idx < label_indices.len() {
+                        return Ok(Some(level - label_indices[selector_idx] as usize));
+                    }
+
+                    return Ok(Some(level - *fallback_label_idx as usize));
+                }
+                Instr::Return => return Ok(Some(0)),
+                Instr::Call(func_idx) => executor.execute_function(module.func_addrs[*func_idx as usize], store)?,
+                Instr::CallIndirect(func_type_idx) => {
+                    // function type should exist due to validation
+                    let expect_func_type = &module.types[*func_type_idx as usize];
+                    let func_idx = executor.pop_value()?.as_i32() as usize;
+
+                    // table should exist due to validation
+                    let table = &store.tables[module.table_addrs[0]];
+
+                    let func_addr = table.elem.get(func_idx)
+                        .ok_or(ExecutionError::Trapped(TrapReason::UndefinedElement { index: func_idx }))?
+                        .ok_or(ExecutionError::Trapped(TrapReason::UninitializedElement { index: func_idx }))?;
+                    
+                    // all indexes in element segments were validated at validation time
+                    let func = &store.funcs[func_addr];
+
+                    let actual_func_type = match func {
+                        FuncInstance::Host {func_type, ..} => func_type,
+                        FuncInstance::Wasm { func_type, .. } => func_type
+                    };
+
+                    // the func type in the table should match the one at the given type index.
+                    if *expect_func_type != **actual_func_type {
+                        return Err(ExecutionError::Trapped(TrapReason::IndirectCallTypeMismatch { expect: expect_func_type.clone(), actual: (**actual_func_type).clone() }))
+                    }
+
+                    executor.execute_function(func_addr, store)?;
+                },
+
+                _ => todo!()
+            }
+        }
+        Ok(None)
     }
 
     /// Decodes a sequence of instructions until it reaches the end marker.

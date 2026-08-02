@@ -27,6 +27,7 @@ impl ValType {
 }
 
 /// Wasm function signature.
+#[derive(Clone, PartialEq, Debug)]
 pub struct FuncType {
     /// Function parameter types.
     pub params: Vec<ValType>,
@@ -632,6 +633,14 @@ impl BlockType {
             Ok(Self::Empty)
         } else {
             Ok(Self::Val(ValType::decode(reader)?))
+        }
+    }
+
+    /// Returns the arity of the block type.
+    pub(crate) fn arity(&self) -> usize {
+        match self {
+            Self::Empty => 0,
+            Self::Val(_) => 1,
         }
     }
 }

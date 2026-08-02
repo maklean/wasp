@@ -9,6 +9,7 @@ pub type Addr = usize;
 pub type FuncElem = Option<Addr>;
 
 /// Runtime representation of a Wasm value.
+#[derive(Clone, Copy)]
 pub enum Val {
     I32(i32),
     I64(i64),
@@ -78,7 +79,7 @@ pub enum FuncInstance {
     /// A function defined inside a Wasm module.
     Wasm {
         /// Signature of the function.
-        func_type: Rc<FuncInstance>,
+        func_type: Rc<FuncType>,
 
         /// Originating module.
         module: Rc<ModuleInstance>,

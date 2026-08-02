@@ -1,6 +1,13 @@
-use crate::{runtime::types::{Addr, ExportInstance, FuncInstance, GlobalInstance, MemInstance, TableInstance}, structure::FuncType};
+use crate::structure::FuncType;
 
 mod types;
+
+pub use types::{
+    Addr, Val, FuncElem,
+    FuncInstance, HostFunc,
+    TableInstance, MemInstance, GlobalInstance,
+    ExportInstance, ExternVal,
+};
 
 /// Runtime representation of a Wasm module.
 pub struct ModuleInstance {
@@ -21,6 +28,10 @@ pub struct ModuleInstance {
 
     /// Module's exports.
     pub exports: Vec<ExportInstance>,
+}
+
+impl ModuleInstance {
+    
 }
 
 /// Global state of a Wasm program.
