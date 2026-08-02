@@ -83,4 +83,7 @@ pub enum TrapReason {
     UninitializedElement { index: usize },
     IndirectCallTypeMismatch { expect: FuncType, actual: FuncType },
     OutOfBoundsMemoryAccess { addr: usize, len: usize, mem_size: usize },
+    DivideByZero,
+    IntegerOverflow,
+    InvalidConversionToInteger,
 }
