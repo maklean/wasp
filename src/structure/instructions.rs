@@ -866,112 +866,156 @@ impl Instr {
         for instr in instructions {
             match instr {
                 // Control Instructions
-                Instr::Unreachable => return Err(ExecutionError::Trapped(TrapReason::Unreachable)),
-                Instr::Nop => {},
-                Instr::Block(block_type, body) => {
-                    let prev_block = executor.enter_block(block_type.arity());
+                    Instr::Unreachable => return Err(ExecutionError::Trapped(TrapReason::Unreachable)),
+                    Instr::Nop => {},
+                    Instr::Block(block_type, body) => {
+                        let prev_block = executor.enter_block(block_type.arity());
 
-                    let branch_target = Self::execute_sequence(body, executor, level + 1, store, Rc::clone(&module))?;
+                        let branch_target = Self::execute_sequence(body, executor, level + 1, store, Rc::clone(&module))?;
 
-                    // check if we're unwinding past this block
-                    let unwinding = branch_target.is_some_and(|target| target <= level);
-                    
-                    executor.exit_block(prev_block, unwinding);
-
-                    // if we're unwinding past this level, we should propagate the branch target up
-                    if unwinding {
-                        return Ok(branch_target);
-                    }
-                },
-                Instr::Loop(block_type, body) => {
-                    let prev_block = executor.enter_block(block_type.arity());
-                    let loop_block_level = level + 1; // the level the loop body executes at
-
-                    loop {
-                        let branch_target = Self::execute_sequence(body, executor, loop_block_level, store, Rc::clone(&module))?;
-
-                        // if the branch target is the loop's body, we loop again
-                        if branch_target.is_some_and(|target| target == loop_block_level) {
-                            continue;
-                        }
-
+                        // check if we're unwinding past this block
                         let unwinding = branch_target.is_some_and(|target| target <= level);
                         
+                        executor.exit_block(prev_block, unwinding);
+
+                        // if we're unwinding past this level, we should propagate the branch target up
+                        if unwinding {
+                            return Ok(branch_target);
+                        }
+                    },
+                    Instr::Loop(block_type, body) => {
+                        let prev_block = executor.enter_block(block_type.arity());
+                        let loop_block_level = level + 1; // the level the loop body executes at
+
+                        loop {
+                            let branch_target = Self::execute_sequence(body, executor, loop_block_level, store, Rc::clone(&module))?;
+
+                            // if the branch target is the loop's body, we loop again
+                            if branch_target.is_some_and(|target| target == loop_block_level) {
+                                continue;
+                            }
+
+                            let unwinding = branch_target.is_some_and(|target| target <= level);
+                            
+                            executor.exit_block(prev_block, unwinding);
+
+                            if unwinding {
+                                return Ok(branch_target);
+                            }
+
+                            break; // loops only loop through branches.
+                        }
+                    },
+                    Instr::If(block_type, then_block, else_block) => {
+                        let condition_is_true = executor.pop_value()?.as_i32() != 0;
+                        let prev_block = executor.enter_block(block_type.arity());
+
+                        // execute corresponding block based on condition
+                        let branch_target = if condition_is_true {
+                            Self::execute_sequence(then_block, executor, level + 1, store, Rc::clone(&module))?
+                        } else {
+                            Self::execute_sequence(else_block, executor, level + 1, store, Rc::clone(&module))?
+                        };
+
+                        let unwinding = branch_target.is_some_and(|target| target <= level);
                         executor.exit_block(prev_block, unwinding);
 
                         if unwinding {
                             return Ok(branch_target);
                         }
+                    },
+                    Instr::Br(label_idx) => return Ok(Some(level - *label_idx as usize)),
+                    Instr::BrIf(label_idx) => {
+                        let condition_is_true = executor.pop_value()?.as_i32() != 0;
 
-                        break; // loops only loop through branches.
+                        if condition_is_true {
+                            return Ok(Some(level - *label_idx as usize));
+                        }
+                    },
+                    Instr::BrTable(label_indices, fallback_label_idx) => {
+                        let selector_idx = executor.pop_value()?.as_i32() as usize;
+
+                        // branch to label index at selector index if it exists in the array, otherwise use the fallback.
+                        if selector_idx < label_indices.len() {
+                            return Ok(Some(level - label_indices[selector_idx] as usize));
+                        }
+
+                        return Ok(Some(level - *fallback_label_idx as usize));
                     }
-                },
-                Instr::If(block_type, then_block, else_block) => {
-                    let condition_is_true = executor.pop_value()?.as_i32() != 0;
-                    let prev_block = executor.enter_block(block_type.arity());
+                    Instr::Return => return Ok(Some(0)),
+                    Instr::Call(func_idx) => executor.execute_function(module.func_addrs[*func_idx as usize], store)?,
+                    Instr::CallIndirect(func_type_idx) => {
+                        // function type should exist due to validation
+                        let expect_func_type = &module.types[*func_type_idx as usize];
+                        let func_idx = executor.pop_value()?.as_i32() as usize;
 
-                    // execute corresponding block based on condition
-                    let branch_target = if condition_is_true {
-                        Self::execute_sequence(then_block, executor, level + 1, store, Rc::clone(&module))?
-                    } else {
-                        Self::execute_sequence(else_block, executor, level + 1, store, Rc::clone(&module))?
-                    };
+                        // table should exist due to validation
+                        let table = &store.tables[module.table_addrs[0]];
 
-                    let unwinding = branch_target.is_some_and(|target| target <= level);
-                    executor.exit_block(prev_block, unwinding);
+                        let func_addr = table.elem.get(func_idx)
+                            .ok_or(ExecutionError::Trapped(TrapReason::UndefinedElement { index: func_idx }))?
+                            .ok_or(ExecutionError::Trapped(TrapReason::UninitializedElement { index: func_idx }))?;
+                        
+                        // all indexes in element segments were validated at validation time
+                        let func = &store.funcs[func_addr];
 
-                    if unwinding {
-                        return Ok(branch_target);
-                    }
-                },
-                Instr::Br(label_idx) => return Ok(Some(level - *label_idx as usize)),
-                Instr::BrIf(label_idx) => {
-                    let condition_is_true = executor.pop_value()?.as_i32() != 0;
+                        let actual_func_type = match func {
+                            FuncInstance::Host {func_type, ..} => func_type,
+                            FuncInstance::Wasm { func_type, .. } => func_type
+                        };
 
-                    if condition_is_true {
-                        return Ok(Some(level - *label_idx as usize));
-                    }
-                },
-                Instr::BrTable(label_indices, fallback_label_idx) => {
-                    let selector_idx = executor.pop_value()?.as_i32() as usize;
+                        // the func type in the table should match the one at the given type index.
+                        if *expect_func_type != **actual_func_type {
+                            return Err(ExecutionError::Trapped(TrapReason::IndirectCallTypeMismatch { expect: expect_func_type.clone(), actual: (**actual_func_type).clone() }))
+                        }
 
-                    // branch to label index at selector index if it exists in the array, otherwise use the fallback.
-                    if selector_idx < label_indices.len() {
-                        return Ok(Some(level - label_indices[selector_idx] as usize));
-                    }
+                        executor.execute_function(func_addr, store)?;
+                    },
 
-                    return Ok(Some(level - *fallback_label_idx as usize));
-                }
-                Instr::Return => return Ok(Some(0)),
-                Instr::Call(func_idx) => executor.execute_function(module.func_addrs[*func_idx as usize], store)?,
-                Instr::CallIndirect(func_type_idx) => {
-                    // function type should exist due to validation
-                    let expect_func_type = &module.types[*func_type_idx as usize];
-                    let func_idx = executor.pop_value()?.as_i32() as usize;
+                // Parametric Instructions
+                    Self::Drop => { executor.pop_value()?; },
+                    Self::Select => {
+                        let condition_is_true = executor.pop_value()?.as_i32() != 0;
 
-                    // table should exist due to validation
-                    let table = &store.tables[module.table_addrs[0]];
+                        let val_2 = executor.pop_value()?;
+                        let val_1 = executor.pop_value()?;
 
-                    let func_addr = table.elem.get(func_idx)
-                        .ok_or(ExecutionError::Trapped(TrapReason::UndefinedElement { index: func_idx }))?
-                        .ok_or(ExecutionError::Trapped(TrapReason::UninitializedElement { index: func_idx }))?;
-                    
-                    // all indexes in element segments were validated at validation time
-                    let func = &store.funcs[func_addr];
+                        if condition_is_true {
+                            executor.push_value(val_1);
+                        } else {
+                            executor.push_value(val_2);
+                        }
+                    },
+                
+                // Select Instructions (all locals and globals accessed exist due to validation)
+                    Instr::LocalGet(local_idx) => {
+                        let local = executor.locals[executor.current_frame.locals_start + *local_idx as usize];
+                        
+                        executor.push_value(local);
+                    },
+                    Instr::LocalSet(local_idx) => {
+                        let val = executor.pop_value()?;
 
-                    let actual_func_type = match func {
-                        FuncInstance::Host {func_type, ..} => func_type,
-                        FuncInstance::Wasm { func_type, .. } => func_type
-                    };
+                        executor.locals[executor.current_frame.locals_start + *local_idx as usize] = val;
+                    },
+                    Instr::LocalTee(local_idx) => {
+                        let val = executor.peek_value()?;
 
-                    // the func type in the table should match the one at the given type index.
-                    if *expect_func_type != **actual_func_type {
-                        return Err(ExecutionError::Trapped(TrapReason::IndirectCallTypeMismatch { expect: expect_func_type.clone(), actual: (**actual_func_type).clone() }))
-                    }
+                        executor.locals[executor.current_frame.locals_start + *local_idx as usize] = val;
+                    },
+                    Instr::GlobalGet(global_idx) => {
+                        let global = &store.globals[module.global_addrs[*global_idx as usize]];
 
-                    executor.execute_function(func_addr, store)?;
-                },
+                        executor.push_value(global.value);
+                    },
+                    Instr::GlobalSet(global_idx) => {
+                        let val = executor.pop_value()?;
 
+                        store.globals[module.global_addrs[*global_idx as usize]].value = val;
+                    },
+                
+                // Memory Instructions
+                
                 _ => todo!()
             }
         }

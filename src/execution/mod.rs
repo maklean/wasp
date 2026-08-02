@@ -93,6 +93,14 @@ impl Executor {
             .ok_or(ExecutionError::UnexpectedStackUnderflow)
     }
 
+    /// Retrieves the value at the top of the operand stack, but does not consume it.
+    pub(crate) fn peek_value(&self) -> Result<Val, ExecutionError> {
+        self.values
+            .get(0)
+            .copied()
+            .ok_or(ExecutionError::UnexpectedStackUnderflow)
+    }
+
     /// Enters a new function call frame. Pushes it parameters onto the locals stack.
     /// Returns the previous function call frame.
     pub(crate) fn enter_frame(&mut self, func_type: FuncType) -> Result<Frame, ExecutionError> {
