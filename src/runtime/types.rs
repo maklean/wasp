@@ -151,9 +151,16 @@ pub struct ExportInstance {
 
 /// Wasm module import/export value.
 pub enum ExternVal {
+    /// Imported/Exported function address in store.
     Func(Addr),
+
+    /// Imported/Exported table address in store.
     Table(Addr),
+
+    /// Imported/Exported memory address in store.
     Mem(Addr),
+
+    /// Imported/Exported global address in store.
     Global(Addr),
 }
 
