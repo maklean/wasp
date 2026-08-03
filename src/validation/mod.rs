@@ -31,22 +31,32 @@ pub(crate) struct Validator<'a> {
 }
 
 impl<'a> Validator<'a> {
-    fn new(module: &'a ParsedModule) -> Self {
+    fn new(module: &'a ParsedModule) -> Result<Self, ValidationError> {
         let types: &'a Vec<FuncType> = &module.types;
 
         // types of imported funcs + module-defined funcs
-        let funcs: Vec<&'a FuncType> = module.imports
-            .iter()
-            .filter_map(|import| match &import.desc {
-                ImportDesc::Func(func_type_idx) => Some(&module.types[*func_type_idx as usize]),
-                _ => None
-            })
-            .chain(
-                module.funcs
-                    .iter()
-                    .map(|func| &module.types[func.type_idx as usize])
-            )
-            .collect();
+        let mut funcs: Vec<&'a FuncType> = Vec::new();
+
+        for import in &module.imports {
+            if let ImportDesc::Func(func_type_idx) = &import.desc {
+                let index = *func_type_idx as usize;
+
+                let func_type = module.types.get(index)
+                    .ok_or(ValidationError::UndefinedType { index })?;
+
+                funcs.push(func_type);
+            }
+        }
+
+        for func in &module.funcs {
+            let index = func.type_idx as usize;
+
+            let func_type = module.types.get(index)
+                .ok_or(ValidationError::UndefinedType { index })?;
+
+            funcs.push(func_type);
+
+        }
             
         // imported table types + module-defined table types
         let tables: Vec<&'a TableType> = module.imports
@@ -81,7 +91,7 @@ impl<'a> Validator<'a> {
             .chain(module.globals.iter().map(|global| &global.global_type))
             .collect();
         
-        Self {
+        Ok(Self {
             module,
             types,
             funcs,
@@ -91,11 +101,11 @@ impl<'a> Validator<'a> {
             locals: Vec::new(),
             opds: Vec::new(),
             ctrls: Vec::new(),
-        }
+        })
     }
 
     pub fn validate(module: &'a ParsedModule) -> Result<(), ValidationError> {
-        let mut this = Self::new(module);
+        let mut this = Self::new(module)?;
 
         // validate functions
         for func in &module.funcs {
@@ -228,13 +238,6 @@ impl<'a> Validator<'a> {
         }
 
         Ok(())
-    }
-
-    /// Returns the operand at the top of the operand stack without consuming.
-    pub fn peek_opd(&self) -> Result<ValType, ValidationError> {
-        self.opds.last()
-            .copied()
-            .ok_or(ValidationError::ExpectedOperandInOpdStack)
     }
 
     /// Enters a new structured control construct with the given label and end types.

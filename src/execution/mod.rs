@@ -96,7 +96,7 @@ impl Executor {
     /// Retrieves the value at the top of the operand stack, but does not consume it.
     pub(crate) fn peek_value(&self) -> Result<Val, ExecutionError> {
         self.values
-            .get(0)
+            .last()
             .copied()
             .ok_or(ExecutionError::UnexpectedStackUnderflow)
     }

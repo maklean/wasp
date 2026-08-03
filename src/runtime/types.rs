@@ -150,6 +150,7 @@ pub struct ExportInstance {
 }
 
 /// Wasm module import/export value.
+#[derive(Clone, Copy)]
 pub enum ExternVal {
     /// Imported/Exported function address in store.
     Func(Addr),

@@ -616,7 +616,7 @@ impl Instr {
                 },
 
                 Self::LocalTee(index) => {
-                    let t = validator.peek_opd()?;
+                    let t = validator.pop_opd()?;
                     
                     let index = *index as usize;
 
@@ -628,6 +628,8 @@ impl Instr {
                     if local != t && local != ValType::Unknown && t != ValType::Unknown {
                         return Err(ValidationError::LocalSetTypeMismatch { expect: local, actual: t });
                     }
+
+                    validator.push_opd(t);
                 },
 
                 Self::GlobalGet(index) => {

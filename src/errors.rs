@@ -68,7 +68,7 @@ pub enum ValidationError {
 }
 
 /// Errors from executing and instantiating a Wasm module.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ExecutionError {
     UnexpectedStackUnderflow,
     Trapped(TrapReason),
@@ -77,7 +77,7 @@ pub enum ExecutionError {
 }
 
 /// Reasons for trapping.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum TrapReason {
     Unreachable,
     CallStackExhausted,
@@ -92,7 +92,7 @@ pub enum TrapReason {
 }
 
 /// Reasons an embedder-supplied import can fail to match a module's declared import.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum EmbedderImportMismatchReason {
     Kind,
     FuncSignature { expected: FuncType, actual: FuncType },
