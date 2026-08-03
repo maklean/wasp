@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{errors::{ExecutionError, TrapReason}, runtime::{FuncInstance, ModuleInstance, Store, Val}, structure::{FuncType, Instr, MemArg}};
+use crate::{errors::{ExecutionError, RuntimeStack, TrapReason}, runtime::{FuncInstance, ModuleInstance, Store, Val}, structure::{FuncType, Instr, MemArg}};
 
 /// Wasm module instance executor.
 #[derive(Default)]
@@ -67,7 +67,7 @@ impl Executor {
                         self.locals.push(v);
                     }
 
-                    Instr::execute_sequence(&code.body.instructions, self, 0, store, module)?;
+                    //Instr::execute_sequence(&code.body.instructions, self, 0, store, module)?;
 
                     self.exit_frame(prev_frame);
                 }
@@ -90,7 +90,7 @@ impl Executor {
     pub(crate) fn pop_value(&mut self) -> Result<Val, ExecutionError> {
         self.values
             .pop()
-            .ok_or(ExecutionError::UnexpectedStackUnderflow)
+            .ok_or(ExecutionError::UnexpectedStackUnderflow(RuntimeStack::Operand))
     }
 
     /// Retrieves the value at the top of the operand stack, but does not consume it.
@@ -98,7 +98,7 @@ impl Executor {
         self.values
             .last()
             .copied()
-            .ok_or(ExecutionError::UnexpectedStackUnderflow)
+            .ok_or(ExecutionError::UnexpectedStackUnderflow(RuntimeStack::Operand))
     }
 
     /// Enters a new function call frame. Pushes it parameters onto the locals stack.

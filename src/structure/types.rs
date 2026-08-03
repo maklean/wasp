@@ -620,11 +620,12 @@ pub enum BlockType {
     Val(ValType)
 }
 
-impl Into<Vec<ValType>> for BlockType {
-    fn into(self) -> Vec<ValType> {
+impl BlockType {
+    /// Converts the BlockType instance to a vector.
+    pub(crate) fn to_vec(&self) -> Vec<ValType> {
         match self {
             Self::Empty => vec![],
-            Self::Val(v) => vec![v]
+            Self::Val(v) => vec![*v],
         }
     }
 }

@@ -242,12 +242,14 @@ impl<'a> Validator<'a> {
 
     /// Enters a new structured control construct with the given label and end types.
     /// Pushes the `CtrlFrame` onto the validator's control frame stack.
-    pub fn push_ctrl(&mut self, label_types: Vec<ValType>, end_types: Vec<ValType>) {
+    pub fn push_ctrl(&mut self, label_types: Vec<ValType>, end_types: Vec<ValType>, is_if: bool) {
         self.ctrls.push(CtrlFrame {
             label_types,
             end_types,
             height: self.opds.len(),
             unreachable: false,
+            is_if,
+            else_seen: false,
         })
     }
 
@@ -341,16 +343,22 @@ impl<'a> Validator<'a> {
 
 /// Structured control instruction (or function body) frame.
 #[derive(Clone)]
-pub struct CtrlFrame {
+pub(crate) struct CtrlFrame {
     /// Types expected on the operand stack when we branch to this construct.
     pub label_types: Vec<ValType>,
 
     /// Types expected on the operand stack when we exit this construct.
-    end_types: Vec<ValType>,
+    pub end_types: Vec<ValType>,
 
     /// Height of the operand stack at the time we entered this construct.
-    height: usize,
+    pub height: usize,
 
     /// Whether we're currently in dead code in this construct.
-    unreachable: bool,
+    pub unreachable: bool,
+
+    /// Whether the this control instruction is an 'if' instruction.
+    pub is_if: bool,
+
+    /// Whether we've seen the 'else' instruction (only relevant if is_if is true).
+    pub else_seen: bool,
 }

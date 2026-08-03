@@ -21,13 +21,11 @@ impl Expr {
         validator.opds.clear();
         validator.ctrls.clear();
 
-        validator.push_ctrl(end_types.clone(), end_types);
+        validator.push_ctrl(end_types.clone(), end_types, false);
 
         for instr in &self.instructions {
             instr.validate(validator)?;
         }
-
-        validator.pop_ctrl()?;
 
         Ok(())
     }
@@ -39,7 +37,7 @@ impl Expr {
 
         let end_types: Vec<ValType> = end_type.into_iter().collect();
 
-        validator.push_ctrl(end_types.clone(), end_types);
+        validator.push_ctrl(end_types.clone(), end_types, false);
 
         for instr in &self.instructions {
             match instr {
@@ -76,11 +74,11 @@ impl Expr {
                     instr.validate(validator)?
                 }
 
+                Instr::End => instr.validate(validator)?,
+
                 _ => Err(ValidationError::NonConstantInstruction { actual: instr.clone() })?
             }
         }
-
-        validator.pop_ctrl()?;
 
         Ok(())
     }
@@ -465,6 +463,7 @@ impl Instr {
                     reader.match_byte(0x00, DecodingError::InvalidCallIndirectInstr { actual: reader.peek_byte()? })?;
                     Ok(Self::CallIndirect(type_idx))
                 }
+                0x0F => Ok(Self::Return),
 
             // Parametric Instructions
                 0x1A => Ok(Self::Drop),
@@ -643,6 +642,342 @@ impl Instr {
         }
     }
 
+    pub(crate) fn validate(&self, validator: &mut Validator) -> Result<(), ValidationError> {
+        match self {
+            // Numeric Instructions
+                // t.const
+                Self::I32Const(_) | Self::I64Const(_) | Self::F32Const(_) | Self::F64Const(_) 
+                    => validator.push_opd(self.numeric_val_type()),
+
+                // t.unop
+                Self::I32Clz | Self::I64Clz | Self::I32Ctz | Self::I64Ctz | Self::I32Popcnt | Self::I64Popcnt
+                    | Self::F32Abs | Self::F64Abs | Self::F32Neg | Self::F64Neg | Self::F32Sqrt | Self::F64Sqrt
+                    | Self::F32Ceil | Self::F64Ceil | Self::F32Floor | Self::F64Floor
+                    | Self::F32Trunc | Self::F64Trunc | Self::F32Nearest | Self::F64Nearest
+                    => validator.unop(self.numeric_val_type())?,
+                
+                // t.binop
+                Self::I32Add | Self::I64Add
+                    | Self::I32Sub | Self::I64Sub | Self::I32Mul | Self::I64Mul | Self::I32DivS | Self::I64DivS
+                    | Self::I32DivU | Self::I64DivU | Self::I32RemS | Self::I64RemS | Self::I32RemU | Self::I64RemU
+                    | Self::I32And | Self::I64And | Self::I32Or | Self::I64Or | Self::I32Xor | Self::I64Xor
+                    | Self::I32Shl | Self::I64Shl | Self::I32ShrS | Self::I64ShrS | Self::I32ShrU | Self::I64ShrU
+                    | Self::I32Rotl | Self::I64Rotl | Self::I32Rotr | Self::I64Rotr | Self::F32Add | Self::F64Add
+                    | Self::F32Sub | Self::F64Sub | Self::F32Mul | Self::F64Mul | Self::F32Div | Self::F64Div
+                    | Self::F32Min | Self::F64Min | Self::F32Max | Self::F64Max | Self::F32Copysign | Self::F64Copysign
+                    => validator.binop(self.numeric_val_type())?,
+
+                // t.testop
+                Self::I32Eqz | Self::I64Eqz => validator.testop(self.numeric_val_type())?,
+
+                // t.relop
+                Self::I32Eq | Self::I64Eq
+                    | Self::I32Ne | Self::I64Ne | Self::I32LtS | Self::I64LtS | Self::I32LtU | Self::I64LtU
+                    | Self::I32GtS | Self::I64GtS | Self::I32GtU | Self::I64GtU | Self::I32LeS | Self::I64LeS
+                    | Self::I32LeU | Self::I64LeU | Self::I32GeS | Self::I64GeS | Self::I32GeU | Self::I64GeU
+                    | Self::F32Eq | Self::F64Eq | Self::F32Ne | Self::F64Ne | Self::F32Lt | Self::F64Lt
+                    | Self::F32Gt | Self::F64Gt | Self::F32Le | Self::F64Le | Self::F32Ge | Self::F64Ge
+                    => validator.relop(self.numeric_val_type())?,
+                
+                // t.cvtop
+                Self::I32WrapI64 => validator.cvtop(ValType::I64, ValType::I32)?,
+                Self::I64ExtendI32S | Self::I64ExtendI32U => validator.cvtop(ValType::I32, ValType::I64)?,
+
+                Self::I32TruncF32S | Self::I32TruncF32U => validator.cvtop(ValType::F32, ValType::I32)?,
+                Self::I32TruncF64S | Self::I32TruncF64U => validator.cvtop(ValType::F64, ValType::I32)?,
+                Self::I64TruncF32S | Self::I64TruncF32U => validator.cvtop(ValType::F32, ValType::I64)?,
+                Self::I64TruncF64S | Self::I64TruncF64U => validator.cvtop(ValType::F64, ValType::I64)?,
+
+                Self::F32DemoteF64 => validator.cvtop(ValType::F64, ValType::F32)?,
+                Self::F64PromoteF32 => validator.cvtop(ValType::F32, ValType::F64)?,
+                
+                Self::F32ConvertI32S | Self::F32ConvertI32U => validator.cvtop(ValType::I32, ValType::F32)?,
+                Self::F32ConvertI64S | Self::F32ConvertI64U => validator.cvtop(ValType::I64, ValType::F32)?,
+                Self::F64ConvertI32S | Self::F64ConvertI32U => validator.cvtop(ValType::I32, ValType::F64)?,
+                Self::F64ConvertI64S | Self::F64ConvertI64U => validator.cvtop(ValType::I64, ValType::F64)?,
+
+                Self::F32ReinterpretI32 => validator.cvtop(ValType::I32, ValType::F32)?,
+                Self::F64ReinterpretI64 => validator.cvtop(ValType::I64, ValType::F64)?,
+                Self::I32ReinterpretF32 => validator.cvtop(ValType::F32, ValType::I32)?,
+                Self::I64ReinterpretF64 => validator.cvtop(ValType::F64, ValType::I64)?,
+            
+            // Parametric Instructions
+                Self::Drop => { validator.pop_opd()?; },
+                Self::Select => {
+                    validator.pop_opd_expect(ValType::I32)?;
+
+                    // ensure both types are the same
+                    let t = validator.pop_opd()?;
+                    let t = validator.pop_opd_expect(t)?;
+
+                    validator.push_opd(t);
+                }
+            
+            // Variable Instructions
+                Self::LocalGet(index) => {
+                    let index = *index as usize;
+
+                    let local = *validator.locals
+                        .get(index)
+                        .ok_or(ValidationError::UndefinedLocal { index })?;
+
+                    validator.push_opd(local);
+                },
+
+                Self::LocalSet(index) => {
+                    let t = validator.pop_opd()?;
+
+                    let index = *index as usize;
+
+                    let local = *validator.locals
+                        .get(index)
+                        .ok_or(ValidationError::UndefinedLocal { index })?;
+                    
+                    // ensure we're setting the local to the same type
+                    if local != t && local != ValType::Unknown && t != ValType::Unknown {
+                        return Err(ValidationError::LocalSetTypeMismatch { expect: local, actual: t });
+                    }
+                },
+
+                Self::LocalTee(index) => {
+                    let t = validator.pop_opd()?;
+                    
+                    let index = *index as usize;
+
+                    let local = *validator.locals
+                        .get(index)
+                        .ok_or(ValidationError::UndefinedLocal { index })?;
+                    
+                    // ensure we're setting the local to the same type
+                    if local != t && local != ValType::Unknown && t != ValType::Unknown {
+                        return Err(ValidationError::LocalSetTypeMismatch { expect: local, actual: t });
+                    }
+
+                    validator.push_opd(t);
+                },
+
+                Self::GlobalGet(index) => {
+                    let index = *index as usize;
+
+                    let global = validator.globals
+                        .get(index)
+                        .ok_or(ValidationError::UndefinedGlobal { index })?;
+
+                    validator.push_opd(global.val_type);
+                },
+
+                Self::GlobalSet(index) => {
+                    let t = validator.pop_opd()?;
+
+                    let index = *index as usize;
+
+                    let global = validator.globals
+                        .get(index)
+                        .ok_or(ValidationError::UndefinedGlobal { index })?;
+                    
+                    // global must be mutable
+                    if global.mutability != Mutability::Var {
+                        return Err(ValidationError::GlobalMustBeMutable { index });
+                    }
+                    
+                    // ensure we're setting the global to the same type
+                    if global.val_type != t && global.val_type != ValType::Unknown && t != ValType::Unknown {
+                        return Err(ValidationError::GlobalSetTypeMismatch { expect: global.val_type, actual: t });
+                    }
+                }
+            
+            // Memory Instructions
+                Self::I32Load(m) | Self::I64Load(m) | Self::F32Load(m) | Self::F64Load(m)
+                    | Self::I32Load8S(m) | Self::I32Load8U(m)
+                    | Self::I32Load16S(m) | Self::I32Load16U(m)
+                    | Self::I64Load8S(m) | Self::I64Load8U(m)
+                    | Self::I64Load16S(m) | Self::I64Load16U(m)
+                    | Self::I64Load32S(m) | Self::I64Load32U(m)
+                    => {
+                        let t = self.numeric_val_type();
+
+                        validator.pop_opd_expect(ValType::I32)?;
+                        m.validate(validator, self.bit_width())?;
+                        validator.push_opd(t);
+                    },
+                
+                Self::I32Store(m) | Self::I64Store(m) | Self::F32Store(m) | Self::F64Store(m)
+                    | Self::I32Store8(m) | Self::I32Store16(m)
+                    | Self::I64Store8(m) | Self::I64Store16(m) | Self::I64Store32(m)
+                    => {
+                        let t = self.numeric_val_type();
+
+                        validator.pop_opds(vec![ValType::I32, t])?;
+                        m.validate(validator, self.bit_width())?;
+                    },
+                
+                Self::MemorySize => {
+                    if validator.mems.is_empty() {
+                        return Err(ValidationError::NoLinearMemoryDefined);
+                    }
+
+                    validator.push_opd(ValType::I32);
+                },
+
+                Self::MemoryGrow => {
+                    if validator.mems.is_empty() {
+                        return Err(ValidationError::NoLinearMemoryDefined);
+                    }
+
+                    validator.pop_opd_expect(ValType::I32)?;
+                    validator.push_opd(ValType::I32);
+                },
+            
+            // Control Instructions
+                Self::Nop => (),
+
+                Self::Unreachable => validator.unreachable()?,
+
+                Self::Block(block_type) => validator.push_ctrl(block_type.to_vec(), block_type.to_vec(), false),
+
+                Self::Loop(block_type) => validator.push_ctrl(vec![], block_type.to_vec(), false),
+
+                Self::If(block_type, _) => {
+                    // pop condition
+                    validator.pop_opd_expect(ValType::I32)?;
+                    validator.push_ctrl(block_type.to_vec(), block_type.to_vec(), true);
+                },
+
+                Self::Else(_) => {
+                    let frame = validator.ctrls
+                        .last()
+                        .cloned()
+                        .ok_or(ValidationError::ExpectedControlFrame)?;
+
+                    // this shouldn't trigger since the frame before 'else' in the decoder is verified to be an 'if' construct.
+                    if !frame.is_if {
+                        panic!("control frame should be an 'if' control construct.");
+                    }
+
+                    // check that then-branch exited with the end types left on the stack.
+                    validator.pop_opds(frame.end_types.clone())?;
+
+                    // should be back at the height where we entered the then-branch.
+                    if validator.opds.len() != frame.height {
+                        return Err(ValidationError::StackHeightMismatch { expect: frame.height, actual: validator.opds.len() });
+                    }
+
+                    let frame = validator.ctrls.last_mut().unwrap();
+
+                    frame.else_seen = true;
+                    frame.unreachable = false; // in-case the then-block was unreachable
+                },
+
+                Self::Br(_, index) => {
+                    // branch to the targetted control frame and expect the label types on the opd stack
+                    let target_ctrl_frame = validator.get_ctrl(*index)?;
+                    
+                    validator.pop_opds(target_ctrl_frame.label_types.clone())?;
+
+                    // rest of the control frame is dead code
+                    validator.unreachable()?;
+                },
+
+                Self::BrIf(_, index) => {
+                    // pop condition
+                    validator.pop_opd_expect(ValType::I32)?;
+
+                    // branch to the targetted control frame and expect the label types on the opd stack
+                    let target_ctrl_frame = validator.get_ctrl(*index)?;
+
+                    let label_types = target_ctrl_frame.label_types.clone();
+                    
+                    validator.pop_opds(label_types.clone())?;
+
+                    // push opds for fallthrough path since it could still run
+                    validator.push_opds(label_types);
+                },
+
+                Self::BrTable(_, _, label_indices, fallback_index) => {
+                    // pop selector index
+                    validator.pop_opd_expect(ValType::I32)?;
+
+                    let fallback_ctrl_frame = validator.get_ctrl(*fallback_index)?;
+
+                    let label_types = fallback_ctrl_frame.label_types.clone();
+
+                    for &index in label_indices {
+                        let ctrl_frame = validator.get_ctrl(index)?;
+
+                        // all target labels must have the same label type as the fallback frame 
+                        if ctrl_frame.label_types != label_types {
+                            return Err(ValidationError::ExpectedMatchingLabelTypes {
+                                expect: label_types,
+                                actual: ctrl_frame.label_types.clone()
+                            });
+                        }
+                    }
+
+                    // branch to one of the labels
+                    validator.pop_opds(label_types)?;
+                    validator.unreachable()?;
+                },
+
+                // doesn't matter what we put for the first value
+                Self::Return => Self::Br(0, validator.ctrls.len() as u32 - 1).validate(validator)?,
+
+                Self::Call(func_idx) => {
+                    let func_idx = *func_idx as usize;
+
+                    let func_type = validator.funcs
+                        .get(func_idx)
+                        .ok_or(ValidationError::UndefinedFunction { index: func_idx })?;
+
+                    let params = func_type.params.clone();
+                    let results = func_type.results.clone();
+
+                    // pop params, push results
+                    validator.pop_opds(params)?;
+                    validator.push_opds(results);
+                },
+
+                Self::CallIndirect(type_idx) => {
+                    let type_idx = *type_idx as usize;
+
+                    if validator.tables.is_empty() {
+                        return Err(ValidationError::NoTableDefined);
+                    }
+
+                    // pop table index off
+                    validator.pop_opd_expect(ValType::I32)?;
+
+                    // there should be a check for TableType.elem_type being funcref, but since it's the only variant, it's already valid
+
+                    let func_type = validator.types
+                        .get(type_idx)
+                        .ok_or(ValidationError::UndefinedType { index: type_idx })?;
+
+                    let params = func_type.params.clone();
+                    let results = func_type.results.clone();
+
+                    // pop params, push results
+                    validator.pop_opds(params)?;
+                    validator.push_opds(results);
+                },
+
+                Self::End => {
+                    let frame = validator.ctrls
+                        .last()
+                        .ok_or(ValidationError::ExpectedControlFrame)?;
+
+                    if !frame.else_seen && frame.is_if && !frame.end_types.is_empty() {
+                        // there was an 'if', but no 'else', the end types should be empty
+                        return Err(ValidationError::ExpectedEmptyIfEndTypes { actual: frame.end_types.clone() });
+                    }
+
+                    let end_types = validator.pop_ctrl()?;
+                    validator.push_opds(end_types);
+                }
+        }
+
+        Ok(())
+    }
+
     /// Patches the branch with the given patch site to go to 'target'.
     fn patch_branch(code: &mut [Instr], site: PatchSite, target: u32) {
         match site {
@@ -650,6 +985,58 @@ impl Instr {
             PatchSite::BrIf(pc) => if let Self::BrIf(t, _) = &mut code[pc] { *t = target; },
             PatchSite::BrTableEntry(pc, entry) => if let Self::BrTable(targets, _, _, _) = &mut code[pc] { targets[entry] = target; },
             PatchSite::BrTableDefault(pc) => if let Self::BrTable(_, default, _, _) = &mut code[pc] { *default = target; },
+        }
+    }
+
+    /// Returns the corresponding ValType for the current numeric instruction.
+    fn numeric_val_type(&self) -> ValType {
+        use Instr::*;
+
+        match self {
+            I32Eqz | I32Eq | I32Ne | I32LtS | I32LtU | I32GtS | I32GtU | I32LeS | I32LeU
+                | I32GeS | I32GeU | I32Clz | I32Ctz | I32Popcnt | I32Add | I32Sub | I32Mul
+                | I32DivS | I32DivU | I32RemS | I32RemU | I32And | I32Or | I32Xor | I32Shl
+                | I32ShrS | I32ShrU | I32Rotl | I32Rotr | I32Const(_) | I32Load(_) | I32Load8S(_) 
+                | I32Load8U(_) | I32Load16S(_) | I32Load16U(_) | I32Store(_)
+                | I32Store8(_) | I32Store16(_) => ValType::I32,
+
+            I64Eqz | I64Eq | I64Ne | I64LtS | I64LtU | I64GtS | I64GtU | I64LeS | I64LeU
+                | I64GeS | I64GeU | I64Clz | I64Ctz | I64Popcnt | I64Add | I64Sub | I64Mul
+                | I64DivS | I64DivU | I64RemS | I64RemU | I64And | I64Or | I64Xor | I64Shl
+                | I64ShrS | I64ShrU | I64Rotl | I64Rotr | I64Const(_) | I64Load(_) 
+                | I64Load8S(_) | I64Load8U(_) | I64Load16S(_) | I64Load16U(_) 
+                | I64Load32S(_) | I64Load32U(_) | I64Store(_) | I64Store8(_) 
+                | I64Store16(_) | I64Store32(_) => ValType::I64,
+
+            F32Eq | F32Ne | F32Lt | F32Gt | F32Le | F32Ge | F32Abs | F32Neg | F32Ceil
+                | F32Floor | F32Trunc | F32Nearest | F32Sqrt | F32Add | F32Sub | F32Mul
+                | F32Div | F32Min | F32Max | F32Copysign | F32Const(_) | F32Load(_) | F32Store(_) => ValType::F32,
+
+            F64Eq | F64Ne | F64Lt | F64Gt | F64Le | F64Ge | F64Abs | F64Neg | F64Ceil
+                | F64Floor | F64Trunc | F64Nearest | F64Sqrt | F64Add | F64Sub | F64Mul
+                | F64Div | F64Min | F64Max | F64Copysign | F64Const(_) | F64Load(_) | F64Store(_) => ValType::F64,
+
+            _ => unreachable!("val_type() called on non-numeric-typed instruction"),
+        }
+    }
+
+    /// Returns the number of bits actually read from/written to memory for this load/store instruction.
+    pub fn bit_width(&self) -> usize {
+        use Instr::*;
+
+        match self {
+            I32Load8S(_) | I32Load8U(_) | I64Load8S(_) | I64Load8U(_)
+                | I32Store8(_) | I64Store8(_) => 8,
+
+            I32Load16S(_) | I32Load16U(_) | I64Load16S(_) | I64Load16U(_)
+                | I32Store16(_) | I64Store16(_) => 16,
+
+            I64Load32S(_) | I64Load32U(_) | I64Store32(_)
+            | I32Load(_) | F32Load(_) | I32Store(_) | F32Store(_) => 32,
+            
+            I64Load(_) | F64Load(_) | I64Store(_) | F64Store(_) => 64,
+
+            _ => unreachable!("bit_width() called on non-memory-access instruction"),
         }
     }
 }
