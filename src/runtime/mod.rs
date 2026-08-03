@@ -360,12 +360,7 @@ impl ModuleInstance {
         executor.execute_function(func_addr, store)?;
 
         // return function call results
-        let arity = match &store.funcs[func_addr] {
-            FuncInstance::Wasm { func_type, .. } => func_type.results.len(),
-            FuncInstance::Host { func_type, .. } => func_type.results.len(),
-        };
-
-        Ok(executor.values[executor.values.len()-arity..].to_vec())
+        Ok(executor.values)
     }
 }
 
