@@ -33,7 +33,7 @@ impl Module {
         result
     }
 
-    /// Instantiates the current module. Returns the `ModuleInstance` if sucessful.
+    /// Instantiates the current module.
     pub fn instantiate(&self, store: &mut Store, imports: &[ExternVal]) -> Result<Rc<ModuleInstance>, ExecutionError> {
         ModuleInstance::instantiate(self, store, imports)
     }
