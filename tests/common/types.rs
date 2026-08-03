@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use wasp::executor::Val;
+use wasp::runtime::Val;
 
 #[derive(Deserialize)]
 pub struct Manifest {
