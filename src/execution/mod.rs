@@ -23,7 +23,7 @@ pub(crate) struct Executor {
 
 impl Executor {
     /// Maximum function call depth.
-    const MAX_CALL_DEPTH: usize = 1000;
+    const MAX_CALL_DEPTH: usize = 1024;
 
     /// Initializes an `Executor` with the `args` pushed onto the operand stack.
     pub(crate) fn with_args(args: Vec<Val>) -> Self {

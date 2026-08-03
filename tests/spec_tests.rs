@@ -2,7 +2,7 @@ use std::{collections::HashMap, fs, path::Path, rc::Rc};
 
 use wasp::{errors::{ExecutionError, TrapReason}, module::Module, runtime::{ExternVal, ModuleInstance, Store, Val}};
 
-use crate::common::{Action, Command, Manifest, SPEC_OUTPUT_DIR, register_spectest, resolve_imports, resolve_module, vals_match};
+use crate::common::{Action, Command, Manifest, SPEC_OUTPUT_DIR, convert_wasts, register_spectest, resolve_imports, resolve_module, vals_match};
 
 mod common;
 
@@ -249,7 +249,7 @@ fn run_spec_test_suite() {
     let child = std::thread::Builder::new()
         .stack_size(STACK_SIZE_MB * 1024 * 1024)
         .spawn(|| {
-            common::convert_wasts();
+            convert_wasts();
 
             let dir = fs::read_dir(Path::new(SPEC_OUTPUT_DIR))
                 .expect(&format!("{} should exist.", SPEC_OUTPUT_DIR));
