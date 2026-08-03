@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{errors::ExecutionError, runtime::{ModuleInstance, Store}, structure::{Func, FuncType, MemArg, Mutability, ValType}};
+use crate::{errors::ExecutionError, runtime::{ModuleInstance, Store}, structure::{Func, FuncType, Mutability, ValType}};
 
 /// Wasm Address.
 pub type Addr = usize;
@@ -9,7 +9,7 @@ pub type Addr = usize;
 pub type FuncElem = Option<Addr>;
 
 /// Runtime representation of a Wasm value.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum Val {
     I32(i32),
     I64(i64),

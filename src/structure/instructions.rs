@@ -1,9 +1,9 @@
 use std::rc::Rc;
 
-use crate::{binary::reader::Reader, errors::{DecodingError, ExecutionError, TrapReason, ValidationError}, execution::Executor, runtime::{Addr, FuncInstance::{self, Host}, ModuleInstance, Store, Val}, structure::{ImportDesc, Mutability, ValType, types::{BlockType, MemArg}}, validation::Validator};
+use crate::{binary::reader::Reader, errors::{DecodingError, ExecutionError, TrapReason, ValidationError}, execution::Executor, runtime::{Addr, FuncInstance, ModuleInstance, Store, Val}, structure::{ImportDesc, Mem, Mutability, ValType, types::{BlockType, MemArg}}, validation::Validator};
 
 /// Wasm expression.
-#[derive(Default, Debug, PartialEq)]
+#[derive(Default, Debug, PartialEq, Clone)]
 pub struct Expr {
     /// Sequence of instructions.
     pub instructions: Vec<Instr>,
@@ -285,12 +285,6 @@ pub enum Instr {
 impl Instr {
     /// Declares the end of an instruction sequence.
     const END_MARKER: u8 = 0x0B;
-
-    /// Size of a page (64 KiB).
-    const PAGE_SIZE: usize = 65536;
-
-    /// Maximum number of pages for a single memory.
-    const MAX_MEMORY_PAGES: usize = 65536;
 
     /// Decodes an instruction.
     pub fn decode(reader: &mut Reader) -> Result<Self, DecodingError> {
@@ -1113,16 +1107,16 @@ impl Instr {
                         let c = executor.pop_value()?.as_f64();
                         executor.mem_store_bytes(64, arg, c.to_bits() as i64, Rc::clone(&module), store)?;
                     },
-                    Instr::MemorySize => executor.push_value(Val::I32((store.mems[module.mem_addrs[0]].data.len() / Self::PAGE_SIZE) as i32)),
+                    Instr::MemorySize => executor.push_value(Val::I32((store.mems[module.mem_addrs[0]].data.len() / Mem::PAGE_SIZE) as i32)),
                     Instr::MemoryGrow => {
                         let mem = &mut store.mems[module.mem_addrs[0]];
 
                         let mem_max_size = mem.max
                             .map(|m| m as usize)
-                            .unwrap_or(Self::MAX_MEMORY_PAGES)
-                            .min(Self::MAX_MEMORY_PAGES);
+                            .unwrap_or(Mem::MEMORY_MAX as usize)
+                            .min(Mem::MEMORY_MAX as usize);
 
-                        let old_size = mem.data.len() / Self::PAGE_SIZE;
+                        let old_size = mem.data.len() / Mem::PAGE_SIZE;
                         let page_count = executor.pop_value()?.as_i32();
 
                         if page_count < 0 {
@@ -1134,7 +1128,7 @@ impl Instr {
                             match new_size {
                                 Some(new_size) if new_size <= mem_max_size => {
                                     // grow memory to new size and push old size onto stack
-                                    mem.data.resize(new_size * Self::PAGE_SIZE, 0);
+                                    mem.data.resize(new_size * Mem::PAGE_SIZE, 0);
 
                                     executor.push_value(Val::I32(old_size as i32));
                                 },

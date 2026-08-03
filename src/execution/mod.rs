@@ -33,8 +33,8 @@ impl Executor {
         }
     }
 
-    /// Executes the function at the given index in the store.
-    pub(crate) fn execute_function(&mut self, func_idx: usize, store: &mut Store) -> Result<(), ExecutionError> {
+    /// Executes the function at the given address in the store.
+    pub(crate) fn execute_function(&mut self, func_addr: usize, store: &mut Store) -> Result<(), ExecutionError> {
         self.call_depth += 1;
 
         if self.call_depth > Self::MAX_CALL_DEPTH {
@@ -43,7 +43,7 @@ impl Executor {
 
         let call_result = (|| -> Result<(), ExecutionError> {
             // this function should only be called on validated modules, so this should exist.
-            let func = &store.funcs[func_idx];
+            let func = &store.funcs[func_addr];
         
             match func {
                 FuncInstance::Host { func_type, code } => {

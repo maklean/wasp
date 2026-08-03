@@ -207,6 +207,9 @@ impl Mem {
     /// The maximum number of pages a linear memory is allowed to span.
     pub const MEMORY_MAX: u64 = 65536;
 
+    /// Size of a memory page (64 KiB).
+    pub const PAGE_SIZE: usize = 65536;
+
     pub(crate) fn decode(reader: &mut Reader) -> Result<Self, DecodingError> {
         Ok(Self {
             mem_type: Limits::decode(reader)?
@@ -310,7 +313,7 @@ impl GlobalType {
 }
 
 /// Mutabilities of data.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Mutability {
     /// Immutable.
     Const,

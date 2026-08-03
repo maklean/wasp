@@ -1,6 +1,6 @@
 use std::io;
 
-use crate::{binary::ModuleSection, structure::{FuncType, Instr, ValType}};
+use crate::{binary::ModuleSection, structure::{FuncType, Instr, Mutability, ValType}};
 
 /// Errors from decoding a Wasm module.
 #[derive(Debug)]
@@ -64,7 +64,7 @@ pub enum ValidationError {
     InvalidStartFunction { params: Vec<ValType>, results: Vec<ValType> },
     DuplicateExportName { name: String },
     TooManyMems { count: usize },
-    TooManyTables { count: usize }
+    TooManyTables { count: usize },
 }
 
 /// Errors from executing and instantiating a Wasm module.
@@ -72,6 +72,8 @@ pub enum ValidationError {
 pub enum ExecutionError {
     UnexpectedStackUnderflow,
     Trapped(TrapReason),
+    EmbedderImportCountMismatch { module_count: usize, embedder_count: usize },
+    EmbedderImportTypeMismatch { module: String, name: String, reason: EmbedderImportMismatchReason },
 }
 
 /// Reasons for trapping.
@@ -83,7 +85,21 @@ pub enum TrapReason {
     UninitializedElement { index: usize },
     IndirectCallTypeMismatch { expect: FuncType, actual: FuncType },
     OutOfBoundsMemoryAccess { addr: usize, len: usize, mem_size: usize },
+    OutOfBoundsElementAccess { offset: usize, len: usize, table_size: usize },
     DivideByZero,
     IntegerOverflow,
     InvalidConversionToInteger,
+}
+
+/// Reasons an embedder-supplied import can fail to match a module's declared import.
+#[derive(Debug)]
+pub enum EmbedderImportMismatchReason {
+    Kind,
+    FuncSignature { expected: FuncType, actual: FuncType },
+    TableTooSmall { expected_min: u32, actual_size: u32 },
+    TableMaxTooLarge { expected_max: u32, actual_max: Option<u32> },
+    MemTooSmall { expected_min: u32, actual_pages: u32 },
+    MemMaxTooLarge { expected_max: u32, actual_max: Option<u32> },
+    GlobalTypeMismatch { expected: ValType, actual: ValType },
+    GlobalMutabilityMismatch { expected: Mutability, actual: Mutability },
 }
