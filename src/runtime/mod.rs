@@ -365,6 +365,7 @@ impl ModuleInstance {
 }
 
 /// Global state of a Wasm program.
+#[derive(Default)]
 pub struct Store {
     /// Function instances.
     pub funcs: Vec<FuncInstance>,
@@ -381,11 +382,6 @@ pub struct Store {
 
 impl Store {
     pub fn new() -> Self {
-        Self { 
-            funcs: Vec::new(), 
-            tables: Vec::new(), 
-            mems: Vec::new(), 
-            globals: Vec::new() 
-        }
+        Default::default()
     }
 }
