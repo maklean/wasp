@@ -101,6 +101,7 @@ impl Expr {
 /// Wasm instructions.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instr {
+    // Control Instructions
     Unreachable,
     Nop,
     Block(BlockType),
@@ -108,9 +109,16 @@ pub enum Instr {
     If(BlockType, u32),
     Else(u32),
     End,
-    Br(u32),
-    BrIf(u32),
-    BrTable(Vec<u32>, u32),
+
+    /// (target_pc, depth)
+    Br(u32, u32),
+
+    /// (target_pc, depth)
+    BrIf(u32, u32),
+
+    /// (target_pcs, fallback_target_pc, target_depths, fallback_target_depth)
+    BrTable(Vec<u32>, u32, Vec<u32>, u32),
+
     Return,
     Call(u32),
     CallIndirect(u32),
@@ -376,10 +384,12 @@ impl Instr {
                 }
 
                 0x0C => {
-                    let depth = reader.read_u32()? as usize;
+                    let depth = reader.read_u32()?;
                     let br_pc = code.len();
 
-                    code.push(Self::Br(u32::MAX));
+                    code.push(Self::Br(u32::MAX, depth));
+
+                    let depth = depth as usize;
 
                     // invalid depths are validation checks, so we just return early.
                     if depth >= labels.len() {
@@ -392,10 +402,12 @@ impl Instr {
                 },
 
                 0x0D => {
-                    let depth = reader.read_u32()? as usize;
+                    let depth = reader.read_u32()?;
                     let br_if_pc = code.len();
 
-                    code.push(Self::BrIf(u32::MAX));
+                    code.push(Self::BrIf(u32::MAX, depth));
+
+                    let depth = depth as usize;
 
                     if depth >= labels.len() {
                         continue;
@@ -414,7 +426,7 @@ impl Instr {
                     let fallback_depth = reader.read_u32()? as usize;
                     let br_table_pc = code.len();
 
-                    code.push(Self::BrTable(vec![u32::MAX; num_labels], u32::MAX)); // push Instr::BrTable with placeholders for the label indices
+                    code.push(Self::BrTable(vec![u32::MAX; num_labels], u32::MAX, depths.clone(), fallback_depth as u32)); // push Instr::BrTable with placeholders for the label indices
 
                     for (entry_index, depth) in depths.iter().enumerate() {
                         if *depth as usize >= labels.len() {
@@ -634,11 +646,10 @@ impl Instr {
     /// Patches the branch with the given patch site to go to 'target'.
     fn patch_branch(code: &mut [Instr], site: PatchSite, target: u32) {
         match site {
-            PatchSite::Br(pc) => if let Self::Br(t) = &mut code[pc] { *t = target; },
-            PatchSite::BrIf(pc) => if let Self::BrIf(t) = &mut code[pc] { *t = target; },
-            PatchSite::BrTableEntry(pc, entry) => if let Self::BrTable(labels, _) = &mut code[pc] { labels[entry] = target; },
-            PatchSite::BrTableDefault(pc) => if let Self::BrTable(_, default) = &mut code[pc] { *default = target; },
+            PatchSite::Br(pc) => if let Self::Br(t, _) = &mut code[pc] { *t = target; },
+            PatchSite::BrIf(pc) => if let Self::BrIf(t, _) = &mut code[pc] { *t = target; },
+            PatchSite::BrTableEntry(pc, entry) => if let Self::BrTable(targets, _, _, _) = &mut code[pc] { targets[entry] = target; },
+            PatchSite::BrTableDefault(pc) => if let Self::BrTable(_, default, _, _) = &mut code[pc] { *default = target; },
         }
     }
-
 }
