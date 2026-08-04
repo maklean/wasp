@@ -30,7 +30,7 @@ impl Executor {
         }
     }
     
-    /// Executes every call frame on the call frame stack until we've reached the target frame count.
+    /// Main VM loop - executes every call frame on the call frame stack.
     fn run(&mut self, store: &mut Store) -> Result<(), ExecutionError> {
         while !self.frames.is_empty() {
             let frame = self.frames.last().unwrap();
@@ -67,7 +67,8 @@ impl Executor {
             FuncInstance::Wasm { func_type, module, code } => {
                 self.push_frame((**func_type).clone(), Rc::clone(code), Rc::clone(module))?;
 
-                // this should only trigger for the outermost function. If there's multiple loops, the whole thing actually breaks
+                // this should only trigger for the outermost function (either the start function or an exported function call). 
+                // If there's multiple VM loops on a single Executor, the whole thing breaks.
                 if main { self.run(store)?; }
             }
         }
