@@ -31,8 +31,8 @@ impl Executor {
     }
     
     /// Executes every call frame on the call frame stack until we've reached the target frame count.
-    pub(crate) fn run(&mut self, store: &mut Store, target_frame_count: usize) -> Result<(), ExecutionError> {
-        while self.frames.len() > target_frame_count {
+    fn run(&mut self, store: &mut Store) -> Result<(), ExecutionError> {
+        while !self.frames.is_empty() {
             let frame = self.frames.last().unwrap();
 
             if frame.pc >= frame.code.body.instructions.len() {
@@ -65,12 +65,10 @@ impl Executor {
             },
 
             FuncInstance::Wasm { func_type, module, code } => {
-                let target_frame_count = self.frames.len();
-
                 self.push_frame((**func_type).clone(), Rc::clone(code), Rc::clone(module))?;
 
                 // this should only trigger for the outermost function. If there's multiple loops, the whole thing actually breaks
-                if main { self.run(store, target_frame_count)?; }
+                if main { self.run(store)?; }
             }
         }
 

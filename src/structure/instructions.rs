@@ -1017,11 +1017,9 @@ impl Instr {
                     let target_block = executor.blocks[target_block_index];
 
                     // number of values to keep when we branch to the block
-                    let is_loop = target_block.kind == LabelKind::Loop;
-                    let keep = if is_loop { 0 } else { target_block.arity };
+                    let keep = if target_block.kind == LabelKind::Loop { 0 } else { target_block.arity };
 
                     executor.values.drain(target_block.values_start..executor.values.len() - keep);
-
                     executor.blocks.truncate(target_block_index);
 
                     let last_frame = executor.frames.last_mut()
