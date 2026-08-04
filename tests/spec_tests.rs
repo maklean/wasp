@@ -6,9 +6,6 @@ use crate::common::{Action, Command, Manifest, SPEC_OUTPUT_DIR, convert_wasts, r
 
 mod common;
 
-/// Rust stack size for spec tests (in MB).
-const STACK_SIZE_MB: usize = 256;
-
 /// Runs a specific Wasm 1.0 spec test from its manifest (.json) file.
 fn run_spec_test(manifest_path: &Path) {
     let dir = manifest_path.parent().unwrap();
@@ -246,23 +243,16 @@ fn run_spec_test(manifest_path: &Path) {
 /// Tests the entire WebAssembly 1.0 spec test suite.
 #[test]
 fn run_spec_test_suite() {
-    let child = std::thread::Builder::new()
-        .stack_size(STACK_SIZE_MB * 1024 * 1024)
-        .spawn(|| {
-            convert_wasts();
+    convert_wasts();
 
-            let dir = fs::read_dir(Path::new(SPEC_OUTPUT_DIR))
-                .expect(&format!("{} should exist.", SPEC_OUTPUT_DIR));
-            
-            for entry in dir {
-                let path = entry.unwrap().path();
-
-                if path.extension().map_or(false, |e| e == "json") {
-                    run_spec_test(&path);
-                }
-            }
-        })
-        .unwrap();
+    let dir = fs::read_dir(Path::new(SPEC_OUTPUT_DIR))
+        .expect(&format!("{} should exist.", SPEC_OUTPUT_DIR));
     
-    child.join().unwrap();
+    for entry in dir {
+        let path = entry.unwrap().path();
+
+        if path.extension().map_or(false, |e| e == "json") {
+            run_spec_test(&path);
+        }
+    }
 }

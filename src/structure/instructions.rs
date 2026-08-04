@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{binary::reader::Reader, errors::{DecodingError, ExecutionError, TrapReason, ValidationError}, execution::Executor, runtime::{Addr, FuncInstance, ModuleInstance, Store, Val}, structure::{ImportDesc, Mem, Mutability, ValType, types::{BlockType, LabelKind, MemArg, OpenLabel, PatchSite}}, validation::Validator};
+use crate::{binary::reader::Reader, errors::{DecodingError, ExecutionError, RuntimeStack, TrapReason, ValidationError}, execution::Executor, runtime::{Addr, FuncInstance, ModuleInstance, Store, Val}, structure::{ImportDesc, Mem, Mutability, ValType, types::{BlockType, LabelKind, MemArg, OpenLabel, PatchSite}}, validation::Validator};
 
 /// Wasm expression.
 #[derive(Default, Debug, PartialEq, Clone)]
@@ -345,6 +345,7 @@ impl Instr {
                     let open = labels.pop();
 
                     code.push(Self::End);
+                    let end_pc = (code.len() - 1) as u32;
                     let exit_pc = code.len() as u32;
 
                     match open {
@@ -367,11 +368,11 @@ impl Instr {
                                 if open.else_pc.is_some() {
                                     // if there's an 'else', set its end target to this index
                                     if let Self::Else(target) = &mut code[open.else_pc.unwrap()] {
-                                        *target = exit_pc;
+                                        *target = end_pc;
                                     }
                                 } else if let Self::If(_, target) = &mut code[open.start_pc] {
                                     // if there's no else-block, the if should skip to the end instr if the condition is false.
-                                    *target = exit_pc;
+                                    *target = end_pc;
                                 }
                             }
                         },
@@ -379,7 +380,7 @@ impl Instr {
                         // instruction sequence is done if there's no labels left.
                         None => break,
                     }
-                }
+                },
 
                 0x0C => {
                     let depth = reader.read_u32()?;
@@ -975,6 +976,549 @@ impl Instr {
                 }
         }
 
+        Ok(())
+    }
+
+    pub(crate) fn execute(&self, executor: &mut Executor, store: &mut Store, module: Rc<ModuleInstance>) -> Result<(), ExecutionError> {
+        match self {
+            // Control Instructions
+                Instr::Unreachable => return Err(ExecutionError::Trapped(TrapReason::Unreachable)),
+                Instr::Nop => {},
+
+                Instr::Block(block_type) => executor.push_block(block_type.arity(), LabelKind::Block),
+                Instr::Loop(block_type) => executor.push_block(block_type.arity(), LabelKind::Loop),
+                
+                Instr::If(block_type, else_pc) => {
+                    let condition_is_true = executor.pop_value()?.as_i32() != 0;
+
+                    executor.push_block(block_type.arity(), LabelKind::If);
+
+                    // jump to else if the condition is false
+                    if !condition_is_true {
+                        let curr_frame = executor.frames.last_mut()
+                            .ok_or(ExecutionError::UnexpectedStackUnderflow(RuntimeStack::Frame))?;
+
+                        curr_frame.pc = *else_pc as usize;
+                    }
+                },
+
+                Instr::Else(target_pc) => {
+                    executor.frames.last_mut().unwrap().pc = *target_pc as usize
+                },
+
+                Instr::End => {
+                    // keep return values
+                    let block = executor.pop_block()?;
+                    executor.values.drain(block.values_start..executor.values.len() - block.arity);
+                },
+
+                Instr::Br(target_pc, depth) => {
+                    let target_block_index = executor.blocks.len() - 1 - *depth as usize;
+                    let target_block = executor.blocks[target_block_index];
+
+                    // number of values to keep when we branch to the block
+                    let is_loop = target_block.kind == LabelKind::Loop;
+                    let keep = if is_loop { 0 } else { target_block.arity };
+
+                    executor.values.drain(target_block.values_start..executor.values.len() - keep);
+
+                    executor.blocks.truncate(target_block_index);
+
+                    let last_frame = executor.frames.last_mut()
+                        .ok_or(ExecutionError::UnexpectedStackUnderflow(RuntimeStack::Frame))?;
+
+                    last_frame.pc = *target_pc as usize;
+                },
+                Instr::BrIf(target_pc, depth) => {
+                    let condition_is_true = executor.pop_value()?.as_i32() != 0;
+
+                    if condition_is_true {
+                        return Self::Br(*target_pc, *depth).execute(executor, store, module);
+                    }
+                },
+                Instr::BrTable(targets_pcs, default_target_pc, depths, default_depth) => {
+                    let selector_idx = executor.pop_value()?.as_i32() as usize;
+
+                    // branch to label index at selector index if it exists in the array, otherwise use fallback
+                    let (target_pc, depth) = match targets_pcs.get(selector_idx) {
+                        Some(&t) => (t, depths[selector_idx]),
+                        None => (*default_target_pc, *default_depth),
+                    };
+
+                    return Self::Br(target_pc, depth).execute(executor, store, module);
+                },
+                Instr::Return => {
+                    let frame = executor.frames.last()
+                        .ok_or(ExecutionError::UnexpectedStackUnderflow(RuntimeStack::Frame))?;
+
+                    // remove every block in the function (and temporaries since it skips Instr::End)
+                    executor.values.drain(frame.values_start..executor.values.len() - frame.arity);
+                    executor.blocks.truncate(frame.blocks_start);
+
+                    executor.frames.last_mut().unwrap().pc = frame.code.body.instructions.len(); // to trigger pop_frame()
+                },
+                Instr::Call(func_idx) => executor.execute_function(module.func_addrs[*func_idx as usize], store, false)?,
+                Instr::CallIndirect(func_type_idx) => {
+                    // function type should exist due to validation
+                    let expect_func_type = &module.types[*func_type_idx as usize];
+                    let func_idx = executor.pop_value()?.as_i32() as usize;
+
+                    // table should exist due to validation
+                    let table = &store.tables[module.table_addrs[0]];
+
+                    let func_addr = table.elem.get(func_idx)
+                        .ok_or(ExecutionError::Trapped(TrapReason::UndefinedElement { index: func_idx }))?
+                        .ok_or(ExecutionError::Trapped(TrapReason::UninitializedElement { index: func_idx }))?;
+                    
+                    // all indexes in element segments were validated at validation time
+                    let func = &store.funcs[func_addr];
+
+                    let actual_func_type = match func {
+                        FuncInstance::Host {func_type, ..} => func_type,
+                        FuncInstance::Wasm { func_type, .. } => func_type
+                    };
+
+                    // the func type in the table should match the one at the given type index.
+                    if *expect_func_type != **actual_func_type {
+                        return Err(ExecutionError::Trapped(TrapReason::IndirectCallTypeMismatch { expect: expect_func_type.clone(), actual: (**actual_func_type).clone() }))
+                    }
+
+                    executor.execute_function(func_addr, store, false)?;
+                },
+                // Parametric Instructions
+                    Self::Drop => { executor.pop_value()?; },
+                    Self::Select => {
+                        let condition_is_true = executor.pop_value()?.as_i32() != 0;
+
+                        let val_2 = executor.pop_value()?;
+                        let val_1 = executor.pop_value()?;
+
+                        if condition_is_true {
+                            executor.push_value(val_1);
+                        } else {
+                            executor.push_value(val_2);
+                        }
+                    },
+                
+                // Select Instructions (all locals and globals accessed exist due to validation)
+                    Instr::LocalGet(local_idx) => {
+                        let current_frame = executor.frames.last()
+                            .ok_or(ExecutionError::UnexpectedStackUnderflow(RuntimeStack::Frame))?;
+
+                        let local = executor.locals[current_frame.locals_start + *local_idx as usize];
+                        
+                        executor.push_value(local);
+                    },
+                    Instr::LocalSet(local_idx) => {
+                        let val = executor.pop_value()?;
+
+                        let current_frame = executor.frames.last()
+                            .ok_or(ExecutionError::UnexpectedStackUnderflow(RuntimeStack::Frame))?;
+
+                        executor.locals[current_frame.locals_start + *local_idx as usize] = val;
+                    },
+                    Instr::LocalTee(local_idx) => {
+                        let val = executor.peek_value()?;
+
+                        let current_frame = executor.frames.last()
+                            .ok_or(ExecutionError::UnexpectedStackUnderflow(RuntimeStack::Frame))?;
+
+                        executor.locals[current_frame.locals_start + *local_idx as usize] = val;
+                    },
+                    Instr::GlobalGet(global_idx) => {
+                        let global = &store.globals[module.global_addrs[*global_idx as usize]];
+
+                        executor.push_value(global.value);
+                    },
+                    Instr::GlobalSet(global_idx) => {
+                        let val = executor.pop_value()?;
+
+                        store.globals[module.global_addrs[*global_idx as usize]].value = val;
+                    },
+                
+                // Memory Instructions
+                    Instr::I32Load(arg) => {
+                        let bytes = executor.mem_load_bytes(32, arg, Rc::clone(&module), store)?;
+                        executor.push_value(Val::I32(i32::from_le_bytes(bytes[..4].try_into().unwrap())));
+                    }
+                    Instr::I64Load(arg) => {
+                        let bytes = executor.mem_load_bytes(64, arg, Rc::clone(&module), store)?;
+                        executor.push_value(Val::I64(i64::from_le_bytes(bytes)));
+                    }
+                    Instr::F32Load(arg) => {
+                        let bytes = executor.mem_load_bytes(32, arg, Rc::clone(&module), store)?;
+                        executor.push_value(Val::F32(f32::from_le_bytes(bytes[..4].try_into().unwrap())));
+                    }
+                    Instr::F64Load(arg) => {
+                        let bytes = executor.mem_load_bytes(64, arg, Rc::clone(&module), store)?;
+                        executor.push_value(Val::F64(f64::from_le_bytes(bytes)));
+                    }
+                    Instr::I32Load8S(arg) => {
+                        let bytes = executor.mem_load_bytes(8, arg, Rc::clone(&module), store)?;
+                        executor.push_value(Val::I32(bytes[0] as i8 as i32));
+                    }
+                    Instr::I32Load8U(arg) => {
+                        let bytes = executor.mem_load_bytes(8, arg, Rc::clone(&module), store)?;
+                        executor.push_value(Val::I32(bytes[0] as u8 as i32));
+                    }
+                    Instr::I32Load16S(arg) => {
+                        let bytes = executor.mem_load_bytes(16, arg, Rc::clone(&module), store)?;
+                        executor.push_value(Val::I32(i16::from_le_bytes(bytes[..2].try_into().unwrap()) as i32));
+                    }
+                    Instr::I32Load16U(arg) => {
+                        let bytes = executor.mem_load_bytes(16, arg, Rc::clone(&module), store)?;
+                        executor.push_value(Val::I32(u16::from_le_bytes(bytes[..2].try_into().unwrap()) as i32));
+                    }
+                    Instr::I64Load8S(arg) => {
+                        let bytes = executor.mem_load_bytes(8, arg, Rc::clone(&module), store)?;
+                        executor.push_value(Val::I64(bytes[0] as i8 as i64));
+                    }
+                    Instr::I64Load8U(arg) => {
+                        let bytes = executor.mem_load_bytes(8, arg, Rc::clone(&module), store)?;
+                        executor.push_value(Val::I64(bytes[0] as u8 as i64));
+                    }
+                    Instr::I64Load16S(arg) => {
+                        let bytes = executor.mem_load_bytes(16, arg, Rc::clone(&module), store)?;
+                        executor.push_value(Val::I64(i16::from_le_bytes(bytes[..2].try_into().unwrap()) as i64));
+                    }
+                    Instr::I64Load16U(arg) => {
+                        let bytes = executor.mem_load_bytes(16, arg, Rc::clone(&module), store)?;
+                        executor.push_value(Val::I64(u16::from_le_bytes(bytes[..2].try_into().unwrap()) as i64));
+                    }
+                    Instr::I64Load32S(arg) => {
+                        let bytes = executor.mem_load_bytes(32, arg, Rc::clone(&module), store)?;
+                        executor.push_value(Val::I64(i32::from_le_bytes(bytes[..4].try_into().unwrap()) as i64));
+                    }
+                    Instr::I64Load32U(arg) => {
+                        let bytes = executor.mem_load_bytes(32, arg, Rc::clone(&module), store)?;
+                        executor.push_value(Val::I64(u32::from_le_bytes(bytes[..4].try_into().unwrap()) as i64));
+                    }
+                    Instr::I32Store(arg) => {
+                        let c = executor.pop_value()?.as_i32();
+                        executor.mem_store_bytes(32, arg, c as i64, Rc::clone(&module), store)?;
+                    }
+                    Instr::I32Store8(arg) => {
+                        let c = executor.pop_value()?.as_i32();
+                        executor.mem_store_bytes(8, arg, c as i64, Rc::clone(&module), store)?;
+                    }
+                    Instr::I32Store16(arg) => {
+                        let c = executor.pop_value()?.as_i32();
+                        executor.mem_store_bytes(16, arg, c as i64, Rc::clone(&module), store)?;
+                    }
+                    Instr::I64Store(arg) => {
+                        let c = executor.pop_value()?.as_i64();
+                        executor.mem_store_bytes(64, arg, c, Rc::clone(&module), store)?;
+                    }
+                    Instr::I64Store8(arg) => {
+                        let c = executor.pop_value()?.as_i64();
+                        executor.mem_store_bytes(8, arg, c, Rc::clone(&module), store)?;
+                    }
+                    Instr::I64Store16(arg) => {
+                        let c = executor.pop_value()?.as_i64();
+                        executor.mem_store_bytes(16, arg, c, Rc::clone(&module), store)?;
+                    }
+                    Instr::I64Store32(arg) => {
+                        let c = executor.pop_value()?.as_i64();
+                        executor.mem_store_bytes(32, arg, c, Rc::clone(&module), store)?;
+                    }
+                    Instr::F32Store(arg) => {
+                        let c = executor.pop_value()?.as_f32();
+                        executor.mem_store_bytes(32, arg, c.to_bits() as i64, Rc::clone(&module), store)?;
+                    }
+                    Instr::F64Store(arg) => {
+                        let c = executor.pop_value()?.as_f64();
+                        executor.mem_store_bytes(64, arg, c.to_bits() as i64, Rc::clone(&module), store)?;
+                    },
+                    Instr::MemorySize => executor.push_value(Val::I32((store.mems[module.mem_addrs[0]].data.len() / Mem::PAGE_SIZE) as i32)),
+                    Instr::MemoryGrow => {
+                        let mem = &mut store.mems[module.mem_addrs[0]];
+
+                        let mem_max_size = mem.max
+                            .map(|m| m as usize)
+                            .unwrap_or(Mem::MEMORY_MAX as usize)
+                            .min(Mem::MEMORY_MAX as usize);
+
+                        let old_size = mem.data.len() / Mem::PAGE_SIZE;
+                        let page_count = executor.pop_value()?.as_i32();
+
+                        if page_count < 0 {
+                            // return -1 if we're passed an invalid page number
+                            executor.push_value(Val::I32(-1));
+                        } else {
+                            let new_size = old_size.checked_add(page_count as usize);
+
+                            match new_size {
+                                Some(new_size) if new_size <= mem_max_size => {
+                                    // grow memory to new size and push old size onto stack
+                                    mem.data.resize(new_size * Mem::PAGE_SIZE, 0);
+
+                                    executor.push_value(Val::I32(old_size as i32));
+                                },
+
+                                _ => executor.push_value(Val::I32(-1)),
+                            }
+                        }
+                    }
+                
+                // Numeric Instructions
+                    Instr::I32Const(v) => executor.push_value(Val::I32(*v)),
+                    Instr::I64Const(v) => executor.push_value(Val::I64(*v)),
+                    Instr::F32Const(v) => executor.push_value(Val::F32(*v)),
+                    Instr::F64Const(v) => executor.push_value(Val::F64(*v)),
+
+                    Instr::I32Clz => executor.unop_i32(|v| v.leading_zeros() as i32)?,
+                    Instr::I32Ctz => executor.unop_i32(|v| v.trailing_zeros() as i32)?,
+                    Instr::I32Popcnt => executor.unop_i32(|v| v.count_ones() as i32)?,
+
+                    Instr::I32Add => executor.binop_i32(|a, b| a.wrapping_add(b))?,
+                    Instr::I32Sub => executor.binop_i32(|a, b| a.wrapping_sub(b))?,
+                    Instr::I32Mul => executor.binop_i32(|a, b| a.wrapping_mul(b))?,
+
+                    Instr::I32DivS => executor.binop_i32_trap(|a, b| {
+                        if b == 0 { return Err(ExecutionError::Trapped(TrapReason::DivideByZero)); }
+                        if a == i32::MIN && b == -1 { return Err(ExecutionError::Trapped(TrapReason::IntegerOverflow)); }
+                        Ok(a.wrapping_div(b))
+                    })?,
+                    Instr::I32DivU => executor.binop_i32_trap(|a, b| {
+                        let (a, b) = (a as u32, b as u32);
+                        if b == 0 { return Err(ExecutionError::Trapped(TrapReason::DivideByZero)); }
+                        Ok((a / b) as i32)
+                    })?,
+                    Instr::I32RemS => executor.binop_i32_trap(|a, b| {
+                        if b == 0 { return Err(ExecutionError::Trapped(TrapReason::DivideByZero)); }
+                        if a == i32::MIN && b == -1 { return Ok(0); }
+                        Ok(a.wrapping_rem(b))
+                    })?,
+                    Instr::I32RemU => executor.binop_i32_trap(|a, b| {
+                        let (a, b) = (a as u32, b as u32);
+                        if b == 0 { return Err(ExecutionError::Trapped(TrapReason::DivideByZero)); }
+                        Ok((a % b) as i32)
+                    })?,
+
+                    Instr::I32And => executor.binop_i32(|a, b| a & b)?,
+                    Instr::I32Or => executor.binop_i32(|a, b| a | b)?,
+                    Instr::I32Xor => executor.binop_i32(|a, b| a ^ b)?,
+                    Instr::I32Shl => executor.binop_i32(|a, b| a.wrapping_shl((b as u32) & 31))?,
+                    Instr::I32ShrS => executor.binop_i32(|a, b| a.wrapping_shr((b as u32) & 31))?,
+                    Instr::I32ShrU => executor.binop_i32(|a, b| ((a as u32).wrapping_shr((b as u32) & 31)) as i32)?,
+                    Instr::I32Rotl => executor.binop_i32(|a, b| a.rotate_left((b as u32) & 31))?,
+                    Instr::I32Rotr => executor.binop_i32(|a, b| a.rotate_right((b as u32) & 31))?,
+
+                    Instr::I32Eqz => executor.testop_i32(|c| c == 0)?,
+                    Instr::I32Eq => executor.relop_i32(|a, b| a == b)?,
+                    Instr::I32Ne => executor.relop_i32(|a, b| a != b)?,
+                    Instr::I32LtS => executor.relop_i32(|a, b| a < b)?,
+                    Instr::I32LtU => executor.relop_i32(|a, b| (a as u32) < (b as u32))?,
+                    Instr::I32GtS => executor.relop_i32(|a, b| a > b)?,
+                    Instr::I32GtU => executor.relop_i32(|a, b| (a as u32) > (b as u32))?,
+                    Instr::I32LeS => executor.relop_i32(|a, b| a <= b)?,
+                    Instr::I32LeU => executor.relop_i32(|a, b| (a as u32) <= (b as u32))?,
+                    Instr::I32GeS => executor.relop_i32(|a, b| a >= b)?,
+                    Instr::I32GeU => executor.relop_i32(|a, b| (a as u32) >= (b as u32))?,
+
+                    Instr::I64Clz => executor.unop_i64(|v| v.leading_zeros() as i64)?,
+                    Instr::I64Ctz => executor.unop_i64(|v| v.trailing_zeros() as i64)?,
+                    Instr::I64Popcnt => executor.unop_i64(|v| v.count_ones() as i64)?,
+
+                    Instr::I64Add => executor.binop_i64(|a, b| a.wrapping_add(b))?,
+                    Instr::I64Sub => executor.binop_i64(|a, b| a.wrapping_sub(b))?,
+                    Instr::I64Mul => executor.binop_i64(|a, b| a.wrapping_mul(b))?,
+
+                    Instr::I64DivS => executor.binop_i64_trap(|a, b| {
+                        if b == 0 { return Err(ExecutionError::Trapped(TrapReason::DivideByZero)); }
+                        if a == i64::MIN && b == -1 { return Err(ExecutionError::Trapped(TrapReason::IntegerOverflow)); }
+                        Ok(a.wrapping_div(b))
+                    })?,
+                    Instr::I64DivU => executor.binop_i64_trap(|a, b| {
+                        let (a, b) = (a as u64, b as u64);
+                        if b == 0 { return Err(ExecutionError::Trapped(TrapReason::DivideByZero)); }
+                        Ok((a / b) as i64)
+                    })?,
+                    Instr::I64RemS => executor.binop_i64_trap(|a, b| {
+                        if b == 0 { return Err(ExecutionError::Trapped(TrapReason::DivideByZero)); }
+                        if a == i64::MIN && b == -1 { return Ok(0); }
+                        Ok(a.wrapping_rem(b))
+                    })?,
+                    Instr::I64RemU => executor.binop_i64_trap(|a, b| {
+                        let (a, b) = (a as u64, b as u64);
+                        if b == 0 { return Err(ExecutionError::Trapped(TrapReason::DivideByZero)); }
+                        Ok((a % b) as i64)
+                    })?,
+
+                    Instr::I64And => executor.binop_i64(|a, b| a & b)?,
+                    Instr::I64Or => executor.binop_i64(|a, b| a | b)?,
+                    Instr::I64Xor => executor.binop_i64(|a, b| a ^ b)?,
+                    Instr::I64Shl => executor.binop_i64(|a, b| a.wrapping_shl((b as u32) & 63))?,
+                    Instr::I64ShrS => executor.binop_i64(|a, b| a.wrapping_shr((b as u32) & 63))?,
+                    Instr::I64ShrU => executor.binop_i64(|a, b| ((a as u64).wrapping_shr((b as u32) & 63)) as i64)?,
+                    Instr::I64Rotl => executor.binop_i64(|a, b| a.rotate_left((b as u32) & 63))?,
+                    Instr::I64Rotr => executor.binop_i64(|a, b| a.rotate_right((b as u32) & 63))?,
+
+                    Instr::I64Eqz => executor.testop_i64(|c| c == 0)?,
+                    Instr::I64Eq => executor.relop_i64(|a, b| a == b)?,
+                    Instr::I64Ne => executor.relop_i64(|a, b| a != b)?,
+                    Instr::I64LtS => executor.relop_i64(|a, b| a < b)?,
+                    Instr::I64LtU => executor.relop_i64(|a, b| (a as u64) < (b as u64))?,
+                    Instr::I64GtS => executor.relop_i64(|a, b| a > b)?,
+                    Instr::I64GtU => executor.relop_i64(|a, b| (a as u64) > (b as u64))?,
+                    Instr::I64LeS => executor.relop_i64(|a, b| a <= b)?,
+                    Instr::I64LeU => executor.relop_i64(|a, b| (a as u64) <= (b as u64))?,
+                    Instr::I64GeS => executor.relop_i64(|a, b| a >= b)?,
+                    Instr::I64GeU => executor.relop_i64(|a, b| (a as u64) >= (b as u64))?,
+
+                    Instr::F32Abs => executor.unop_f32(|v| v.abs())?,
+                    Instr::F32Neg => executor.unop_f32(|v| -v)?,
+                    Instr::F32Sqrt => executor.unop_f32(|v| v.sqrt())?,
+                    Instr::F32Ceil => executor.unop_f32(|v| v.ceil())?,
+                    Instr::F32Floor => executor.unop_f32(|v| v.floor())?,
+                    Instr::F32Trunc => executor.unop_f32(|v| v.trunc())?,
+                    Instr::F32Nearest => executor.unop_f32(|v| v.round_ties_even())?,
+                    Instr::F32Add => executor.binop_f32(|a, b| a + b)?,
+                    Instr::F32Sub => executor.binop_f32(|a, b| a - b)?,
+                    Instr::F32Mul => executor.binop_f32(|a, b| a * b)?,
+                    Instr::F32Div => executor.binop_f32(|a, b| a / b)?,
+                    Instr::F32Min => executor.binop_f32(|a, b| {
+                        if a.is_nan() || b.is_nan() {
+                            f32::NAN
+                        } else if a == 0.0 && b == 0.0 {
+                            if a.is_sign_negative() || b.is_sign_negative() { -0.0 } else { 0.0 }
+                        } else {
+                            a.min(b)
+                        }
+                    })?,
+                    Instr::F32Max => executor.binop_f32(|a, b| {
+                        if a.is_nan() || b.is_nan() {
+                            f32::NAN
+                        } else if a == 0.0 && b == 0.0 {
+                            if a.is_sign_positive() || b.is_sign_positive() { 0.0 } else { -0.0 }
+                        } else {
+                            a.max(b)
+                        }
+                    })?,
+                    Instr::F32Copysign => executor.binop_f32(|a, b| a.copysign(b))?,
+                    Instr::F32Eq => executor.relop_f32(|a, b| a == b)?,
+                    Instr::F32Ne => executor.relop_f32(|a, b| a != b)?,
+                    Instr::F32Lt => executor.relop_f32(|a, b| a < b)?,
+                    Instr::F32Gt => executor.relop_f32(|a, b| a > b)?,
+                    Instr::F32Le => executor.relop_f32(|a, b| a <= b)?,
+                    Instr::F32Ge => executor.relop_f32(|a, b| a >= b)?,
+
+                    Instr::F64Abs => executor.unop_f64(|v| v.abs())?,
+                    Instr::F64Neg => executor.unop_f64(|v| -v)?,
+                    Instr::F64Sqrt => executor.unop_f64(|v| v.sqrt())?,
+                    Instr::F64Ceil => executor.unop_f64(|v| v.ceil())?,
+                    Instr::F64Floor => executor.unop_f64(|v| v.floor())?,
+                    Instr::F64Trunc => executor.unop_f64(|v| v.trunc())?,
+                    Instr::F64Nearest => executor.unop_f64(|v| v.round_ties_even())?,
+                    Instr::F64Add => executor.binop_f64(|a, b| a + b)?,
+                    Instr::F64Sub => executor.binop_f64(|a, b| a - b)?,
+                    Instr::F64Mul => executor.binop_f64(|a, b| a * b)?,
+                    Instr::F64Div => executor.binop_f64(|a, b| a / b)?,
+                    Instr::F64Min => executor.binop_f64(|a, b| {
+                        if a.is_nan() || b.is_nan() {
+                            f64::NAN
+                        } else if a == 0.0 && b == 0.0 {
+                            if a.is_sign_negative() || b.is_sign_negative() { -0.0 } else { 0.0 }
+                        } else {
+                            a.min(b)
+                        }
+                    })?,
+                    Instr::F64Max => executor.binop_f64(|a, b| {
+                        if a.is_nan() || b.is_nan() {
+                            f64::NAN
+                        } else if a == 0.0 && b == 0.0 {
+                            if a.is_sign_positive() || b.is_sign_positive() { 0.0 } else { -0.0 }
+                        } else {
+                            a.max(b)
+                        }
+                    })?,
+                    Instr::F64Copysign => executor.binop_f64(|a, b| a.copysign(b))?,
+                    Instr::F64Eq => executor.relop_f64(|a, b| a == b)?,
+                    Instr::F64Ne => executor.relop_f64(|a, b| a != b)?,
+                    Instr::F64Lt => executor.relop_f64(|a, b| a < b)?,
+                    Instr::F64Gt => executor.relop_f64(|a, b| a > b)?,
+                    Instr::F64Le => executor.relop_f64(|a, b| a <= b)?,
+                    Instr::F64Ge => executor.relop_f64(|a, b| a >= b)?,
+
+                    Instr::I32WrapI64 => executor.cvtop_from_i64(|v| Val::I32(v as i32))?,
+
+                    Instr::I64ExtendI32U => executor.cvtop_from_i32(|v| Val::I64(v as u32 as i64))?,
+                    Instr::I64ExtendI32S => executor.cvtop_from_i32(|v| Val::I64(v as i64))?,
+
+                    Instr::I32TruncF32U => executor.cvtop_from_f32_trap(|v| {
+                        if v.is_nan() || !(v > -1.0 && v < 4294967296.0) {
+                            return Err(ExecutionError::Trapped(TrapReason::InvalidConversionToInteger));
+                        }
+
+                        Ok(Val::I32(v.trunc() as u32 as i32))
+                    })?,
+                    Instr::I32TruncF32S => executor.cvtop_from_f32_trap(|v| {
+                        if v.is_nan() || !(v >= -2147483648.0 && v < 2147483648.0) {
+                            return Err(ExecutionError::Trapped(TrapReason::InvalidConversionToInteger));
+                        }
+
+                        Ok(Val::I32(v.trunc() as i32))
+                    })?,
+                    Instr::I64TruncF32U => executor.cvtop_from_f32_trap(|v| {
+                        if v.is_nan() || !(v > -1.0 && v < 18446744073709551616.0) {
+                            return Err(ExecutionError::Trapped(TrapReason::InvalidConversionToInteger));
+                        }
+
+                        Ok(Val::I64(v.trunc() as u64 as i64))
+                    })?,
+                    Instr::I64TruncF32S => executor.cvtop_from_f32_trap(|v| {
+                        if v.is_nan() || !(v >= -9223372036854775808.0 && v < 9223372036854775808.0) {
+                            return Err(ExecutionError::Trapped(TrapReason::InvalidConversionToInteger));
+                        }
+
+                        Ok(Val::I64(v.trunc() as i64))
+                    })?,
+                    Instr::I32TruncF64U => executor.cvtop_from_f64_trap(|v| {
+                        if v.is_nan() || !(v > -1.0 && v < 4294967296.0) {
+                            return Err(ExecutionError::Trapped(TrapReason::InvalidConversionToInteger));
+                        }
+
+                        Ok(Val::I32(v.trunc() as u32 as i32))
+                    })?,
+                    Instr::I32TruncF64S => executor.cvtop_from_f64_trap(|v| {
+                        if v.is_nan() || !(v >= -2147483648.0 && v < 2147483648.0) {
+                            return Err(ExecutionError::Trapped(TrapReason::InvalidConversionToInteger));
+                        }
+
+                        Ok(Val::I32(v.trunc() as i32))
+                    })?,
+                    Instr::I64TruncF64U => executor.cvtop_from_f64_trap(|v| {
+                        if v.is_nan() || !(v > -1.0 && v < 18446744073709551616.0) {
+                            return Err(ExecutionError::Trapped(TrapReason::InvalidConversionToInteger));
+                        }
+
+                        Ok(Val::I64(v.trunc() as u64 as i64))
+                    })?,
+                    Instr::I64TruncF64S => executor.cvtop_from_f64_trap(|v| {
+                        if v.is_nan() || !(v >= -9223372036854775808.0 && v < 9223372036854775808.0) {
+                            return Err(ExecutionError::Trapped(TrapReason::InvalidConversionToInteger));
+                        }
+
+                        Ok(Val::I64(v.trunc() as i64))
+                    })?,
+
+                    Instr::F32ConvertI32U => executor.cvtop_from_i32(|v| Val::F32(v as u32 as f32))?,
+                    Instr::F32ConvertI32S => executor.cvtop_from_i32(|v| Val::F32(v as f32))?,
+                    Instr::F64ConvertI32U => executor.cvtop_from_i32(|v| Val::F64(v as u32 as f64))?,
+                    Instr::F64ConvertI32S => executor.cvtop_from_i32(|v| Val::F64(v as f64))?,
+                    Instr::F32ConvertI64U => executor.cvtop_from_i64(|v| Val::F32(v as u64 as f32))?,
+                    Instr::F32ConvertI64S => executor.cvtop_from_i64(|v| Val::F32(v as f32))?,
+                    Instr::F64ConvertI64U => executor.cvtop_from_i64(|v| Val::F64(v as u64 as f64))?,
+                    Instr::F64ConvertI64S => executor.cvtop_from_i64(|v| Val::F64(v as f64))?,
+
+                    Instr::F32DemoteF64 => executor.cvtop_from_f64(|v| Val::F32(v as f32))?,
+                    Instr::F64PromoteF32 => executor.cvtop_from_f32(|v| Val::F64(v as f64))?,
+
+                    Instr::I32ReinterpretF32 => executor.cvtop_from_f32(|v| Val::I32(v.to_bits() as i32))?,
+                    Instr::I64ReinterpretF64 => executor.cvtop_from_f64(|v| Val::I64(v.to_bits() as i64))?,
+                    Instr::F32ReinterpretI32 => executor.cvtop_from_i32(|v| Val::F32(f32::from_bits(v as u32)))?,
+                    Instr::F64ReinterpretI64 => executor.cvtop_from_i64(|v| Val::F64(f64::from_bits(v as u64)))?,
+        }
         Ok(())
     }
 

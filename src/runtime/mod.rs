@@ -12,6 +12,7 @@ pub use types::{
 };
 
 /// Runtime representation of a Wasm module.
+#[derive(Default)]
 pub struct ModuleInstance {
     /// Module-defined function signatures.
     pub types: Vec<FuncType>,
@@ -232,7 +233,7 @@ impl ModuleInstance {
         // run start function if present
         if let Some(start_idx) = module.start {
             let mut executor = Executor::with_args(vec![]);
-            executor.execute_function(this.func_addrs[start_idx as usize], store)?;
+            executor.execute_function(this.func_addrs[start_idx as usize], store, true)?;
         }
 
         Ok(this)
@@ -357,7 +358,7 @@ impl ModuleInstance {
         };
 
         let mut executor = Executor::with_args(args.to_vec());
-        executor.execute_function(func_addr, store)?;
+        executor.execute_function(func_addr, store, true)?;
 
         // return function call results
         Ok(executor.values)

@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{errors::{ExecutionError, RuntimeStack, TrapReason}, runtime::{FuncInstance, ModuleInstance, Store, Val}, structure::{FuncType, Instr, MemArg}};
+use crate::{errors::{ExecutionError, RuntimeStack, TrapReason}, runtime::{FuncInstance, ModuleInstance, Store, Val}, structure::{Func, FuncType, LabelKind, MemArg}};
 
 /// Wasm module instance executor.
 #[derive(Default)]
@@ -11,14 +11,11 @@ pub(crate) struct Executor {
     /// Locals of all currently active functions.
     pub locals: Vec<Val>,
 
-    /// Current function frame we're in.
-    pub current_frame: Frame,
+    /// Function call frame stack.
+    pub frames: Vec<Frame>,
 
-    /// Current control construct we're in.
-    pub current_block: Block,
-
-    /// Current function call depth.
-    pub call_depth: usize,
+    /// Control construct stack.
+    pub blocks: Vec<Block>,
 }
 
 impl Executor {
@@ -32,53 +29,52 @@ impl Executor {
             ..Default::default()
         }
     }
+    
+    /// Executes every call frame on the call frame stack until we've reached the target frame count.
+    pub(crate) fn run(&mut self, store: &mut Store, target_frame_count: usize) -> Result<(), ExecutionError> {
+        while self.frames.len() > target_frame_count {
+            let frame = self.frames.last().unwrap();
 
-    /// Executes the function at the given address in the store.
-    pub(crate) fn execute_function(&mut self, func_addr: usize, store: &mut Store) -> Result<(), ExecutionError> {
-        self.call_depth += 1;
-
-        if self.call_depth > Self::MAX_CALL_DEPTH {
-            return Err(ExecutionError::Trapped(TrapReason::CallStackExhausted));
-        }
-
-        let call_result = (|| -> Result<(), ExecutionError> {
-            // this function should only be called on validated modules, so this should exist.
-            let func = &store.funcs[func_addr];
-        
-            match func {
-                FuncInstance::Host { func_type, code } => {
-                    let code = Rc::clone(code);
-                    let params: Vec<Val> = self.values.drain(self.values.len() - func_type.params.len()..).collect();
-                
-                    // execute function and push results to operand stack
-                    for v in (code.func)(store, params)? {
-                        self.push_value(v);
-                    }
-                },
-
-                FuncInstance::Wasm { func_type, module, code } => {
-                    let module = Rc::clone(&module);
-                    let code = Rc::clone(&code);
-
-                    let prev_frame = self.enter_frame((**func_type).clone())?;
-
-                    // add zero'ed locals to locals stack, then execute function body
-                    for v in code.locals.iter().copied().map(Val::zero) {
-                        self.locals.push(v);
-                    }
-
-                    //Instr::execute_sequence(&code.body.instructions, self, 0, store, module)?;
-
-                    self.exit_frame(prev_frame);
-                }
+            if frame.pc >= frame.code.body.instructions.len() {
+                self.pop_frame()?;
+                continue;
             }
 
-            Ok(())
-        })();
+            let module = Rc::clone(&frame.module);
+            let instr = frame.code.body.instructions[frame.pc].clone();
+            self.frames.last_mut().unwrap().pc += 1;
 
-        self.call_depth -= 1;
+            instr.execute(self, store, module)?;
+        }
 
-        call_result
+        Ok(())
+    }
+
+    /// Executes the function at the given address in the store.
+    pub(crate) fn execute_function(&mut self, func_addr: usize, store: &mut Store, main: bool) -> Result<(), ExecutionError> {
+        let func = &store.funcs[func_addr];
+
+        match func {
+            FuncInstance::Host { func_type, code } => {
+                let code = Rc::clone(code);
+                let params: Vec<Val> = self.values.drain(self.values.len() - func_type.params.len()..).collect();
+
+                for v in (code.func)(store, params)? {
+                    self.push_value(v);
+                }
+            },
+
+            FuncInstance::Wasm { func_type, module, code } => {
+                let target_frame_count = self.frames.len();
+
+                self.push_frame((**func_type).clone(), Rc::clone(code), Rc::clone(module))?;
+
+                // this should only trigger for the outermost function. If there's multiple loops, the whole thing actually breaks
+                if main { self.run(store, target_frame_count)?; }
+            }
+        }
+
+        Ok(())
     }
 
     /// Pushses the given value onto the operand stack.
@@ -101,9 +97,13 @@ impl Executor {
             .ok_or(ExecutionError::UnexpectedStackUnderflow(RuntimeStack::Operand))
     }
 
-    /// Enters a new function call frame. Pushes it parameters onto the locals stack.
-    /// Returns the previous function call frame.
-    pub(crate) fn enter_frame(&mut self, func_type: FuncType) -> Result<Frame, ExecutionError> {
+    /// Pushes a new function call frame onto the call frame stack. 
+    /// Pushes its parameters and locals onto the locals stack.
+    pub(crate) fn push_frame(&mut self, func_type: FuncType, code: Rc<Func>, module: Rc<ModuleInstance>) -> Result<(), ExecutionError> {
+        if self.frames.len() >= Self::MAX_CALL_DEPTH {
+            return Err(ExecutionError::Trapped(TrapReason::CallStackExhausted));
+        }
+
         let locals_start = self.locals.len();
 
         // add function params to locals
@@ -114,51 +114,56 @@ impl Executor {
 
         self.locals[locals_start..].reverse();
 
-        // set the new current frame
-        let prev_frame = self.current_frame;
-
-        let new_frame = Frame {
-            arity: func_type.results.len(),
-            locals_start,
-            values_start: self.values.len()
-        };
-
-        self.current_frame = new_frame;
-
-        Ok(prev_frame)
-    }
-
-    /// Exits the function call frame into the given previous one. Keeps the current
-    /// function frame's return values on the operand stack.
-    pub(crate) fn exit_frame(&mut self, prev_frame: Frame) {
-        // remove function locals and temporaries
-        self.locals.truncate(self.current_frame.locals_start);
-        self.values.drain(self.current_frame.values_start..self.values.len() - self.current_frame.arity); // keep function return values
-
-        self.current_frame = prev_frame;
-    }
-
-    /// Enters a new control construct that returns `arity` values. Returns the previous control construct.
-    pub(crate) fn enter_block(&mut self, arity: usize) -> Block {
-        let prev_block = self.current_block;
-
-        self.current_block = Block {
-            arity,
-            values_start: self.values.len()
-        };
-
-        prev_block
-    }
-
-    /// Exits the current control construct into the given one. If we're not unwinding
-    /// past this construct, its temporaries are removed from the operand stack and its 
-    /// return values are kept on the operand stack.
-    pub(crate) fn exit_block(&mut self, prev_block: Block, unwinding: bool) {
-        if !unwinding {
-            self.values.drain(self.current_block.values_start..self.values.len() - self.current_block.arity); // keep the block's return values
+        // add zero'ed locals to locals stack
+        for v in code.locals.iter().copied().map(Val::zero) {
+            self.locals.push(v);
         }
 
-        self.current_block = prev_block;
+        let arity = func_type.results.len();
+        let values_start = self.values.len();
+        let blocks_start = self.blocks.len();
+
+        self.frames.push(Frame {
+            arity,
+            locals_start,
+            values_start,
+            blocks_start,
+            pc: 0,
+            code,
+            module,
+        });
+
+        self.push_block(arity, LabelKind::Block);
+
+        Ok(())
+    }
+
+    /// Pops a function call frame from the call frame stack. Keeps
+    /// its return values on the operand stack.
+    pub(crate) fn pop_frame(&mut self) -> Result<Frame, ExecutionError> {
+        let frame = self.frames.pop()
+            .ok_or(ExecutionError::UnexpectedStackUnderflow(RuntimeStack::Frame))?;
+
+        // remove function's locals, and blocks (temporaries are cleared once Instr::end is reached)
+        self.locals.truncate(frame.locals_start);
+        self.blocks.truncate(frame.blocks_start);
+
+        Ok(frame)
+    }
+
+    /// Pushes a new control construct that returns `arity` values onto the control construct stack.
+    pub(crate) fn push_block(&mut self, arity: usize, kind: LabelKind) {
+        self.blocks.push(Block {
+            arity,
+            values_start: self.values.len(),
+            kind,
+        });
+    }
+
+    /// Pops a control construct from the control construct stack.
+    pub(crate) fn pop_block(&mut self) -> Result<Block, ExecutionError> {
+        self.blocks.pop()
+            .ok_or(ExecutionError::UnexpectedStackUnderflow(RuntimeStack::Block))
     }
 
     /// Executes a unary i32 operator.
@@ -460,7 +465,7 @@ impl Executor {
 }
 
 /// Function call frame.
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone)]
 pub struct Frame {
     /// Number of values the function returns.
     pub arity: usize,
@@ -469,15 +474,30 @@ pub struct Frame {
     pub locals_start: usize,
 
     /// Where the function's temporaries begin in the executor's operand stack.
-    pub values_start: usize
+    pub values_start: usize,
+
+    /// Where the function begins in the control construct stack.
+    pub blocks_start: usize,
+
+    /// Program Counter (instruction index).
+    pub pc: usize,
+
+    /// Function call frame's code.
+    pub code: Rc<Func>,
+
+    /// The module the function is in.
+    pub module: Rc<ModuleInstance>,
 }
 
 /// Control construct.
-#[derive(Default, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct Block {
+    /// Type of control construct.
+    pub kind: LabelKind,
+
     /// Number of values the construct returns.
     pub arity: usize,
 
     /// Where the construct's temporaries begin in the executor's operand stack.
-    pub values_start: usize
+    pub values_start: usize,
 }

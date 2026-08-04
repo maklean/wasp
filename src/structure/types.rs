@@ -685,6 +685,7 @@ impl MemArg {
 }
 
 /// Types of control constructs.
+#[derive(Clone, Copy, PartialEq)]
 pub(crate) enum LabelKind {
     /// Block construct.
     Block,

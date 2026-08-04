@@ -13,3 +13,5 @@ pub use types::{
     Export, ExportDesc,
     MemArg
 };
+
+pub(crate) use types::{LabelKind};
