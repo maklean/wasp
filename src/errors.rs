@@ -24,12 +24,12 @@ pub enum DecodingError {
     InvalidExportDesc { actual: u8 },
     TooManyLocals,
     InvalidFuncCodeSize { expect: usize, actual: usize },
-    ExpectedEndOfInstrSeq { actual: u8 },
     InvalidInstr { actual: u8 },
     InvalidMemorySizeInstr { actual: u8 },
     InvalidMemoryGrowInstr { actual: u8 },
     InvalidCallIndirectInstr { actual: u8 },
     InvalidIfThenInstr { actual: u8 },
+    OpenLabelStackUnderflow,
     Io(io::Error),
 }
 
@@ -41,6 +41,7 @@ pub enum ValidationError {
     ExpectedOperandInOpdStack,
     OperandMismatch { expect: ValType, actual: ValType },
     StackHeightMismatch { expect: usize, actual: usize },
+    ExpectedEmptyIfEndTypes { actual: Vec<ValType> },
     UndefinedLocal { index: usize },
     LocalSetTypeMismatch { expect: ValType, actual: ValType },
     UndefinedGlobal { index: usize },
@@ -70,10 +71,23 @@ pub enum ValidationError {
 /// Errors from executing and instantiating a Wasm module.
 #[derive(Debug, PartialEq)]
 pub enum ExecutionError {
-    UnexpectedStackUnderflow,
+    UnexpectedStackUnderflow(RuntimeStack),
     Trapped(TrapReason),
     EmbedderImportCountMismatch { module_count: usize, embedder_count: usize },
     EmbedderImportTypeMismatch { module: String, name: String, reason: EmbedderImportMismatchReason },
+}
+
+/// Types of runtime stacks.
+#[derive(Debug, PartialEq)]
+pub enum RuntimeStack {
+    /// Operand stack.
+    Operand,
+
+    /// Function call frame stack.
+    Frame,
+
+    /// Control construct stack.
+    Block,
 }
 
 /// Reasons for trapping.

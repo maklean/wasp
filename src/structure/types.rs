@@ -620,11 +620,12 @@ pub enum BlockType {
     Val(ValType)
 }
 
-impl Into<Vec<ValType>> for BlockType {
-    fn into(self) -> Vec<ValType> {
+impl BlockType {
+    /// Converts the BlockType instance to a vector.
+    pub(crate) fn to_vec(&self) -> Vec<ValType> {
         match self {
             Self::Empty => vec![],
-            Self::Val(v) => vec![v]
+            Self::Val(v) => vec![*v],
         }
     }
 }
@@ -680,5 +681,61 @@ impl MemArg {
         }
 
         Ok(())
+    }
+}
+
+/// Types of control constructs.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum LabelKind {
+    /// Block construct.
+    Block,
+
+    /// Loop construct.
+    Loop,
+
+    /// If-then-else construct.
+    If,
+}
+
+/// Types of branches that need patching.
+pub(crate) enum PatchSite {
+    /// Patch site for Instr::Br(target), keeps track of the index where the Instr::Br is.
+    Br(usize),
+
+    /// Patch site for Instr::BrIf(target), keeps track of the index where the Instr::BrIf is.
+    BrIf(usize),
+
+    /// Patch site for a label in Instr::BrTable array, keeps track of the index where the 
+    /// Instr::BrTable is, and its index in the BrTable array.
+    BrTableEntry(usize, usize),
+
+    /// Patch site for the fallback label of a Instr::BrTable, keeps track of the index where
+    /// the Instr::BrTable is.
+    BrTableDefault(usize),
+}
+
+/// An open control construct while decoding.
+pub(crate) struct OpenLabel {
+    /// Type of label.
+    pub kind: LabelKind,
+
+    /// Where the instruction begins in the decoded sequence.
+    pub start_pc: usize,
+
+    /// Where the 'else' instruction starts (only relevant for 'if' instructions)
+    pub else_pc: Option<usize>,
+
+    /// List of branches targeting this label.
+    pub pending_br: Vec<PatchSite>,
+}
+
+impl OpenLabel {
+    pub fn new(kind: LabelKind, start_pc: usize, else_pc: Option<usize>) -> Self {
+        Self {
+            kind,
+            start_pc,
+            else_pc,
+            pending_br: Vec::new(),
+        }
     }
 }

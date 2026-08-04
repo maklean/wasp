@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{binary::reader::Reader, errors::{DecodingError, ExecutionError, TrapReason, ValidationError}, execution::Executor, runtime::{Addr, FuncInstance, ModuleInstance, Store, Val}, structure::{ImportDesc, Mem, Mutability, ValType, types::{BlockType, MemArg}}, validation::Validator};
+use crate::{binary::reader::Reader, errors::{DecodingError, ExecutionError, RuntimeStack, TrapReason, ValidationError}, execution::Executor, runtime::{Addr, FuncInstance, ModuleInstance, Store, Val}, structure::{ImportDesc, Mem, Mutability, ValType, types::{BlockType, LabelKind, MemArg, OpenLabel, PatchSite}}, validation::Validator};
 
 /// Wasm expression.
 #[derive(Default, Debug, PartialEq, Clone)]
@@ -21,13 +21,11 @@ impl Expr {
         validator.opds.clear();
         validator.ctrls.clear();
 
-        validator.push_ctrl(end_types.clone(), end_types);
+        validator.push_ctrl(end_types.clone(), end_types, false);
 
         for instr in &self.instructions {
             instr.validate(validator)?;
         }
-
-        validator.pop_ctrl()?;
 
         Ok(())
     }
@@ -39,7 +37,7 @@ impl Expr {
 
         let end_types: Vec<ValType> = end_type.into_iter().collect();
 
-        validator.push_ctrl(end_types.clone(), end_types);
+        validator.push_ctrl(end_types.clone(), end_types, false);
 
         for instr in &self.instructions {
             match instr {
@@ -76,11 +74,11 @@ impl Expr {
                     instr.validate(validator)?
                 }
 
+                Instr::End => instr.validate(validator)?,
+
                 _ => Err(ValidationError::NonConstantInstruction { actual: instr.clone() })?
             }
         }
-
-        validator.pop_ctrl()?;
 
         Ok(())
     }
@@ -104,12 +102,21 @@ pub enum Instr {
     // Control Instructions
     Unreachable,
     Nop,
-    Block(BlockType, Vec<Instr>),
-    Loop(BlockType, Vec<Instr>),
-    If(BlockType, Vec<Instr>, Vec<Instr>),
-    Br(u32),
-    BrIf(u32),
-    BrTable(Vec<u32>, u32),
+    Block(BlockType),
+    Loop(BlockType),
+    If(BlockType, u32),
+    Else(u32),
+    End,
+
+    /// (target_pc, depth)
+    Br(u32, u32),
+
+    /// (target_pc, depth)
+    BrIf(u32, u32),
+
+    /// (target_pcs, fallback_target_pc, target_depths, fallback_target_depth)
+    BrTable(Vec<u32>, u32, Vec<u32>, u32),
+
     Return,
     Call(u32),
     CallIndirect(u32),
@@ -283,241 +290,359 @@ pub enum Instr {
 }
 
 impl Instr {
-    /// Declares the end of an instruction sequence.
-    const END_MARKER: u8 = 0x0B;
+    /// Decodes a sequence of instructions until it reaches the final end instruction.
+    pub fn decode_sequence(reader: &mut Reader) -> Result<Vec<Instr>, DecodingError> {
+        // code sequence
+        let mut code: Vec<Instr> = Vec::new();
 
-    /// Decodes an instruction.
-    pub fn decode(reader: &mut Reader) -> Result<Self, DecodingError> {
-        match reader.read_byte()? {
-            // Control Instructions
-            0x00 => Ok(Self::Unreachable),
-            0x01 => Ok(Self::Nop),
-            0x02 => Ok(Self::Block(BlockType::decode(reader)?, Self::decode_sequence(reader)?)),
-            0x03 => Ok(Self::Loop(BlockType::decode(reader)?, Self::decode_sequence(reader)?)),
-            0x04 => {
-                let block_type = BlockType::decode(reader)?;
+        // currently open labels that need to be resolved.
+        let mut labels: Vec<OpenLabel> = Vec::new();
 
-                let mut then_instr: Vec<Instr> = Vec::new();
-                let mut else_instr: Vec<Instr> = Vec::new();
+        loop {
+            match reader.read_byte()? {
+                0x02 => {
+                    let block_type = BlockType::decode(reader)?;
 
-                // consume into then-block until we hit end marker or else opcode
-                while !matches!(reader.peek_byte()?, Self::END_MARKER | 0x05) {
-                    then_instr.push(Self::decode(reader)?);
-                }
+                    labels.push(OpenLabel::new(LabelKind::Block, code.len(), None));
+                    code.push(Self::Block(block_type));
+                },
+                
+                0x03 => {
+                    let block_type = BlockType::decode(reader)?;
 
-                // parse else block if present
-                if reader.peek_byte()? == 0x05 {
-                    // shouldn't fail
-                    reader.match_byte(0x05, DecodingError::InvalidIfThenInstr { actual: reader.peek_byte()? })?;
+                    labels.push(OpenLabel::new(LabelKind::Loop, code.len(), None));
+                    code.push(Self::Loop(block_type));
+                },
 
-                    while reader.peek_byte()? != Self::END_MARKER {
-                        else_instr.push(Self::decode(reader)?);
+                0x04 => {
+                    let block_type = BlockType::decode(reader)?;
+
+                    labels.push(OpenLabel::new(LabelKind::If, code.len(), None));
+                    code.push(Self::If(block_type, u32::MAX)); // for now set the 'else' target to a placeholder.
+                },
+
+                0x05 => {
+                    let open = labels.last_mut().ok_or(DecodingError::OpenLabelStackUnderflow)?;
+
+                    // if the label isn't an 'if', the module is malformed
+                    if !matches!(open.kind, LabelKind::If) {
+                        return Err(DecodingError::InvalidIfThenInstr { actual: 0x05 });
                     }
+
+                    let else_body_start = code.len() as u32 + 1;
+
+                    // set the If's else target to the start of the else's body
+                    if let Self::If(_, target) = &mut code[open.start_pc] {
+                        *target = else_body_start;
+                    }
+
+                    open.else_pc = Some(code.len());
+                    code.push(Self::Else(u32::MAX)); // set end of if-then-else target to placeholder
+                },
+
+                0x0B => {
+                    // end instruction
+                    let open = labels.pop();
+
+                    code.push(Self::End);
+                    let end_pc = (code.len() - 1) as u32;
+                    let exit_pc = code.len() as u32;
+
+                    match open {
+                        Some(open) => {
+                            // resolve branch target for label
+                            let branch_target = match open.kind {
+                                // branches to loops go to the start of the loop
+                                LabelKind::Loop => open.start_pc as u32,
+
+                                // branches to everything else go to the end
+                                _ => exit_pc,
+                            };
+
+                            // resolve all branches to this label
+                            for site in open.pending_br {
+                                Self::patch_branch(&mut code, site, branch_target);
+                            }
+
+                            if matches!(open.kind, LabelKind::If) {
+                                if open.else_pc.is_some() {
+                                    // if there's an 'else', set its end target to this index
+                                    if let Self::Else(target) = &mut code[open.else_pc.unwrap()] {
+                                        *target = end_pc;
+                                    }
+                                } else if let Self::If(_, target) = &mut code[open.start_pc] {
+                                    // if there's no else-block, the if should skip to the end instr if the condition is false.
+                                    *target = end_pc;
+                                }
+                            }
+                        },
+
+                        // instruction sequence is done if there's no labels left.
+                        None => break,
+                    }
+                },
+
+                0x0C => {
+                    let depth = reader.read_u32()?;
+                    let br_pc = code.len();
+
+                    code.push(Self::Br(u32::MAX, depth));
+
+                    let depth = depth as usize;
+
+                    // invalid depths are validation checks, so we just return early.
+                    if depth >= labels.len() {
+                        continue;
+                    }
+
+                    // add Br to list of pending br's for target label
+                    let label_index = labels.len() - 1 - depth;
+                    labels[label_index].pending_br.push(PatchSite::Br(br_pc));
+                },
+
+                0x0D => {
+                    let depth = reader.read_u32()?;
+                    let br_if_pc = code.len();
+
+                    code.push(Self::BrIf(u32::MAX, depth));
+
+                    let depth = depth as usize;
+
+                    if depth >= labels.len() {
+                        continue;
+                    }
+
+                    let label_index = labels.len() - 1 - depth;
+                    labels[label_index].pending_br.push(PatchSite::BrIf(br_if_pc));
+                },
+
+                0x0E => {
+                    let num_labels = reader.read_u32()? as usize;
+                    let depths: Vec<u32> = (0..num_labels)
+                        .map(|_| reader.read_u32())
+                        .collect::<Result<Vec<_>, _>>()?;
+
+                    let fallback_depth = reader.read_u32()? as usize;
+                    let br_table_pc = code.len();
+
+                    code.push(Self::BrTable(vec![u32::MAX; num_labels], u32::MAX, depths.clone(), fallback_depth as u32)); // push Instr::BrTable with placeholders for the label indices
+
+                    for (entry_index, depth) in depths.iter().enumerate() {
+                        if *depth as usize >= labels.len() {
+                            continue;
+                        }
+
+                        let label_index = labels.len() - 1 - *depth as usize;
+                        labels[label_index].pending_br.push(PatchSite::BrTableEntry(br_table_pc, entry_index));
+                    }
+
+                    if fallback_depth >= labels.len() {
+                        continue;
+                    }
+
+                    let default_index = labels.len() - 1 - fallback_depth;
+                    labels[default_index].pending_br.push(PatchSite::BrTableDefault(br_table_pc));
                 }
 
-                reader.match_byte(Self::END_MARKER, DecodingError::ExpectedEndOfInstrSeq { actual: reader.peek_byte()? })?;
-
-                Ok(Self::If(block_type, then_instr, else_instr))
-            },
-            0x0C => Ok(Self::Br(reader.read_u32()?)),
-            0x0D => Ok(Self::BrIf(reader.read_u32()?)),
-            0x0E => {
-                let num_labels = reader.read_u32()? as usize;
-                let mut labels: Vec<u32> = Vec::with_capacity(num_labels);
-
-                for _ in 0..num_labels {
-                    labels.push(reader.read_u32()?);
-                }
-
-                Ok(Self::BrTable(labels, reader.read_u32()?))
-            },
-            0x0F => Ok(Self::Return),
-            0x10 => Ok(Self::Call(reader.read_u32()?)),
-            0x11 => {
-                let type_idx = reader.read_u32()?;
-
-                reader.match_byte(0x00, DecodingError::InvalidCallIndirectInstr { actual: reader.peek_byte()? })?;
-                Ok(Self::CallIndirect(type_idx))
+                byte => code.push(Self::decode_ncc(byte, reader)?)
             }
+        }
+
+        Ok(code)
+    }
+
+    /// Decodes non-control-construct related instructions.
+    fn decode_ncc(byte: u8, reader: &mut Reader) -> Result<Self, DecodingError> {
+        match byte {
+            // Control Instructions
+                0x00 => Ok(Self::Unreachable),
+                0x01 => Ok(Self::Nop),
+                0x10 => Ok(Self::Call(reader.read_u32()?)),
+                0x11 => {
+                    let type_idx = reader.read_u32()?;
+
+                    reader.match_byte(0x00, DecodingError::InvalidCallIndirectInstr { actual: reader.peek_byte()? })?;
+                    Ok(Self::CallIndirect(type_idx))
+                }
+                0x0F => Ok(Self::Return),
 
             // Parametric Instructions
-            0x1A => Ok(Self::Drop),
-            0x1B => Ok(Self::Select),
+                0x1A => Ok(Self::Drop),
+                0x1B => Ok(Self::Select),
 
             // Variable Instructions
-            0x20 => Ok(Instr::LocalGet(reader.read_u32()?)),
-            0x21 => Ok(Instr::LocalSet(reader.read_u32()?)),
-            0x22 => Ok(Instr::LocalTee(reader.read_u32()?)),
-            0x23 => Ok(Instr::GlobalGet(reader.read_u32()?)),
-            0x24 => Ok(Instr::GlobalSet(reader.read_u32()?)),
+                0x20 => Ok(Self::LocalGet(reader.read_u32()?)),
+                0x21 => Ok(Self::LocalSet(reader.read_u32()?)),
+                0x22 => Ok(Self::LocalTee(reader.read_u32()?)),
+                0x23 => Ok(Self::GlobalGet(reader.read_u32()?)),
+                0x24 => Ok(Self::GlobalSet(reader.read_u32()?)),
 
             // Memory Instructions
-            0x28 => Ok(Instr::I32Load(MemArg::decode(reader)?)),
-            0x29 => Ok(Instr::I64Load(MemArg::decode(reader)?)),
-            0x2A => Ok(Instr::F32Load(MemArg::decode(reader)?)),
-            0x2B => Ok(Instr::F64Load(MemArg::decode(reader)?)),
-            0x2C => Ok(Instr::I32Load8S(MemArg::decode(reader)?)),
-            0x2D => Ok(Instr::I32Load8U(MemArg::decode(reader)?)),
-            0x2E => Ok(Instr::I32Load16S(MemArg::decode(reader)?)),
-            0x2F => Ok(Instr::I32Load16U(MemArg::decode(reader)?)),
-            0x30 => Ok(Instr::I64Load8S(MemArg::decode(reader)?)),
-            0x31 => Ok(Instr::I64Load8U(MemArg::decode(reader)?)),
-            0x32 => Ok(Instr::I64Load16S(MemArg::decode(reader)?)),
-            0x33 => Ok(Instr::I64Load16U(MemArg::decode(reader)?)),
-            0x34 => Ok(Instr::I64Load32S(MemArg::decode(reader)?)),
-            0x35 => Ok(Instr::I64Load32U(MemArg::decode(reader)?)),
-            0x36 => Ok(Instr::I32Store(MemArg::decode(reader)?)),
-            0x37 => Ok(Instr::I64Store(MemArg::decode(reader)?)),
-            0x38 => Ok(Instr::F32Store(MemArg::decode(reader)?)),
-            0x39 => Ok(Instr::F64Store(MemArg::decode(reader)?)),
-            0x3A => Ok(Instr::I32Store8(MemArg::decode(reader)?)),
-            0x3B => Ok(Instr::I32Store16(MemArg::decode(reader)?)),
-            0x3C => Ok(Instr::I64Store8(MemArg::decode(reader)?)),
-            0x3D => Ok(Instr::I64Store16(MemArg::decode(reader)?)),
-            0x3E => Ok(Instr::I64Store32(MemArg::decode(reader)?)),
-            0x3F => {
-                reader.match_byte(0x00, DecodingError::InvalidMemorySizeInstr { actual: reader.peek_byte()? })?;
-                Ok(Self::MemorySize)
-            },
-            0x40 => {
-                reader.match_byte(0x00, DecodingError::InvalidMemoryGrowInstr { actual: reader.peek_byte()? })?;
-                Ok(Self::MemoryGrow)
-            }
+                0x28 => Ok(Self::I32Load(MemArg::decode(reader)?)),
+                0x29 => Ok(Self::I64Load(MemArg::decode(reader)?)),
+                0x2A => Ok(Self::F32Load(MemArg::decode(reader)?)),
+                0x2B => Ok(Self::F64Load(MemArg::decode(reader)?)),
+                0x2C => Ok(Self::I32Load8S(MemArg::decode(reader)?)),
+                0x2D => Ok(Self::I32Load8U(MemArg::decode(reader)?)),
+                0x2E => Ok(Self::I32Load16S(MemArg::decode(reader)?)),
+                0x2F => Ok(Self::I32Load16U(MemArg::decode(reader)?)),
+                0x30 => Ok(Self::I64Load8S(MemArg::decode(reader)?)),
+                0x31 => Ok(Self::I64Load8U(MemArg::decode(reader)?)),
+                0x32 => Ok(Self::I64Load16S(MemArg::decode(reader)?)),
+                0x33 => Ok(Self::I64Load16U(MemArg::decode(reader)?)),
+                0x34 => Ok(Self::I64Load32S(MemArg::decode(reader)?)),
+                0x35 => Ok(Self::I64Load32U(MemArg::decode(reader)?)),
+                0x36 => Ok(Self::I32Store(MemArg::decode(reader)?)),
+                0x37 => Ok(Self::I64Store(MemArg::decode(reader)?)),
+                0x38 => Ok(Self::F32Store(MemArg::decode(reader)?)),
+                0x39 => Ok(Self::F64Store(MemArg::decode(reader)?)),
+                0x3A => Ok(Self::I32Store8(MemArg::decode(reader)?)),
+                0x3B => Ok(Self::I32Store16(MemArg::decode(reader)?)),
+                0x3C => Ok(Self::I64Store8(MemArg::decode(reader)?)),
+                0x3D => Ok(Self::I64Store16(MemArg::decode(reader)?)),
+                0x3E => Ok(Self::I64Store32(MemArg::decode(reader)?)),
+                0x3F => {
+                    reader.match_byte(0x00, DecodingError::InvalidMemorySizeInstr { actual: reader.peek_byte()? })?;
+                    Ok(Self::MemorySize)
+                },
+                0x40 => {
+                    reader.match_byte(0x00, DecodingError::InvalidMemoryGrowInstr { actual: reader.peek_byte()? })?;
+                    Ok(Self::MemoryGrow)
+                }
 
             // Numeric Instructions
-            0x41 => Ok(Self::I32Const(reader.read_i32()?)),
-            0x42 => Ok(Self::I64Const(reader.read_i64()?)),
-            0x43 => Ok(Self::F32Const(reader.read_f32()?)),
-            0x44 => Ok(Self::F64Const(reader.read_f64()?)),
-            0x45 => Ok(Self::I32Eqz),
-            0x46 => Ok(Self::I32Eq),
-            0x47 => Ok(Self::I32Ne),
-            0x48 => Ok(Self::I32LtS),
-            0x49 => Ok(Self::I32LtU),
-            0x4A => Ok(Self::I32GtS),
-            0x4B => Ok(Self::I32GtU),
-            0x4C => Ok(Self::I32LeS),
-            0x4D => Ok(Self::I32LeU),
-            0x4E => Ok(Self::I32GeS),
-            0x4F => Ok(Self::I32GeU),
-            0x50 => Ok(Self::I64Eqz),
-            0x51 => Ok(Self::I64Eq),
-            0x52 => Ok(Self::I64Ne),
-            0x53 => Ok(Self::I64LtS),
-            0x54 => Ok(Self::I64LtU),
-            0x55 => Ok(Self::I64GtS),
-            0x56 => Ok(Self::I64GtU),
-            0x57 => Ok(Self::I64LeS),
-            0x58 => Ok(Self::I64LeU),
-            0x59 => Ok(Self::I64GeS),
-            0x5A => Ok(Self::I64GeU),
-            0x5B => Ok(Self::F32Eq),
-            0x5C => Ok(Self::F32Ne),
-            0x5D => Ok(Self::F32Lt),
-            0x5E => Ok(Self::F32Gt),
-            0x5F => Ok(Self::F32Le),
-            0x60 => Ok(Self::F32Ge),
-            0x61 => Ok(Self::F64Eq),
-            0x62 => Ok(Self::F64Ne),
-            0x63 => Ok(Self::F64Lt),
-            0x64 => Ok(Self::F64Gt),
-            0x65 => Ok(Self::F64Le),
-            0x66 => Ok(Self::F64Ge),
-            0x67 => Ok(Self::I32Clz),
-            0x68 => Ok(Self::I32Ctz),
-            0x69 => Ok(Self::I32Popcnt),
-            0x6A => Ok(Self::I32Add),
-            0x6B => Ok(Self::I32Sub),
-            0x6C => Ok(Self::I32Mul),
-            0x6D => Ok(Self::I32DivS),
-            0x6E => Ok(Self::I32DivU),
-            0x6F => Ok(Self::I32RemS),
-            0x70 => Ok(Self::I32RemU),
-            0x71 => Ok(Self::I32And),
-            0x72 => Ok(Self::I32Or),
-            0x73 => Ok(Self::I32Xor),
-            0x74 => Ok(Self::I32Shl),
-            0x75 => Ok(Self::I32ShrS),
-            0x76 => Ok(Self::I32ShrU),
-            0x77 => Ok(Self::I32Rotl),
-            0x78 => Ok(Self::I32Rotr),
-            0x79 => Ok(Self::I64Clz),
-            0x7A => Ok(Self::I64Ctz),
-            0x7B => Ok(Self::I64Popcnt),
-            0x7C => Ok(Self::I64Add),
-            0x7D => Ok(Self::I64Sub),
-            0x7E => Ok(Self::I64Mul),
-            0x7F => Ok(Self::I64DivS),
-            0x80 => Ok(Self::I64DivU),
-            0x81 => Ok(Self::I64RemS),
-            0x82 => Ok(Self::I64RemU),
-            0x83 => Ok(Self::I64And),
-            0x84 => Ok(Self::I64Or),
-            0x85 => Ok(Self::I64Xor),
-            0x86 => Ok(Self::I64Shl),
-            0x87 => Ok(Self::I64ShrS),
-            0x88 => Ok(Self::I64ShrU),
-            0x89 => Ok(Self::I64Rotl),
-            0x8A => Ok(Self::I64Rotr),
-            0x8B => Ok(Self::F32Abs),
-            0x8C => Ok(Self::F32Neg),
-            0x8D => Ok(Self::F32Ceil),
-            0x8E => Ok(Self::F32Floor),
-            0x8F => Ok(Self::F32Trunc),
-            0x90 => Ok(Self::F32Nearest),
-            0x91 => Ok(Self::F32Sqrt),
-            0x92 => Ok(Self::F32Add),
-            0x93 => Ok(Self::F32Sub),
-            0x94 => Ok(Self::F32Mul),
-            0x95 => Ok(Self::F32Div),
-            0x96 => Ok(Self::F32Min),
-            0x97 => Ok(Self::F32Max),
-            0x98 => Ok(Self::F32Copysign),
-            0x99 => Ok(Self::F64Abs),
-            0x9A => Ok(Self::F64Neg),
-            0x9B => Ok(Self::F64Ceil),
-            0x9C => Ok(Self::F64Floor),
-            0x9D => Ok(Self::F64Trunc),
-            0x9E => Ok(Self::F64Nearest),
-            0x9F => Ok(Self::F64Sqrt),
-            0xA0 => Ok(Self::F64Add),
-            0xA1 => Ok(Self::F64Sub),
-            0xA2 => Ok(Self::F64Mul),
-            0xA3 => Ok(Self::F64Div),
-            0xA4 => Ok(Self::F64Min),
-            0xA5 => Ok(Self::F64Max),
-            0xA6 => Ok(Self::F64Copysign),
-            0xA7 => Ok(Self::I32WrapI64),
-            0xA8 => Ok(Self::I32TruncF32S),
-            0xA9 => Ok(Self::I32TruncF32U),
-            0xAA => Ok(Self::I32TruncF64S),
-            0xAB => Ok(Self::I32TruncF64U),
-            0xAC => Ok(Self::I64ExtendI32S),
-            0xAD => Ok(Self::I64ExtendI32U),
-            0xAE => Ok(Self::I64TruncF32S),
-            0xAF => Ok(Self::I64TruncF32U),
-            0xB0 => Ok(Self::I64TruncF64S),
-            0xB1 => Ok(Self::I64TruncF64U),
-            0xB2 => Ok(Self::F32ConvertI32S),
-            0xB3 => Ok(Self::F32ConvertI32U),
-            0xB4 => Ok(Self::F32ConvertI64S),
-            0xB5 => Ok(Self::F32ConvertI64U),
-            0xB6 => Ok(Self::F32DemoteF64),
-            0xB7 => Ok(Self::F64ConvertI32S),
-            0xB8 => Ok(Self::F64ConvertI32U),
-            0xB9 => Ok(Self::F64ConvertI64S),
-            0xBA => Ok(Self::F64ConvertI64U),
-            0xBB => Ok(Self::F64PromoteF32),
-            0xBC => Ok(Self::I32ReinterpretF32),
-            0xBD => Ok(Self::I64ReinterpretF64),
-            0xBE => Ok(Self::F32ReinterpretI32),
-            0xBF => Ok(Self::F64ReinterpretI64),
+                0x41 => Ok(Self::I32Const(reader.read_i32()?)),
+                0x42 => Ok(Self::I64Const(reader.read_i64()?)),
+                0x43 => Ok(Self::F32Const(reader.read_f32()?)),
+                0x44 => Ok(Self::F64Const(reader.read_f64()?)),
+                0x45 => Ok(Self::I32Eqz),
+                0x46 => Ok(Self::I32Eq),
+                0x47 => Ok(Self::I32Ne),
+                0x48 => Ok(Self::I32LtS),
+                0x49 => Ok(Self::I32LtU),
+                0x4A => Ok(Self::I32GtS),
+                0x4B => Ok(Self::I32GtU),
+                0x4C => Ok(Self::I32LeS),
+                0x4D => Ok(Self::I32LeU),
+                0x4E => Ok(Self::I32GeS),
+                0x4F => Ok(Self::I32GeU),
+                0x50 => Ok(Self::I64Eqz),
+                0x51 => Ok(Self::I64Eq),
+                0x52 => Ok(Self::I64Ne),
+                0x53 => Ok(Self::I64LtS),
+                0x54 => Ok(Self::I64LtU),
+                0x55 => Ok(Self::I64GtS),
+                0x56 => Ok(Self::I64GtU),
+                0x57 => Ok(Self::I64LeS),
+                0x58 => Ok(Self::I64LeU),
+                0x59 => Ok(Self::I64GeS),
+                0x5A => Ok(Self::I64GeU),
+                0x5B => Ok(Self::F32Eq),
+                0x5C => Ok(Self::F32Ne),
+                0x5D => Ok(Self::F32Lt),
+                0x5E => Ok(Self::F32Gt),
+                0x5F => Ok(Self::F32Le),
+                0x60 => Ok(Self::F32Ge),
+                0x61 => Ok(Self::F64Eq),
+                0x62 => Ok(Self::F64Ne),
+                0x63 => Ok(Self::F64Lt),
+                0x64 => Ok(Self::F64Gt),
+                0x65 => Ok(Self::F64Le),
+                0x66 => Ok(Self::F64Ge),
+                0x67 => Ok(Self::I32Clz),
+                0x68 => Ok(Self::I32Ctz),
+                0x69 => Ok(Self::I32Popcnt),
+                0x6A => Ok(Self::I32Add),
+                0x6B => Ok(Self::I32Sub),
+                0x6C => Ok(Self::I32Mul),
+                0x6D => Ok(Self::I32DivS),
+                0x6E => Ok(Self::I32DivU),
+                0x6F => Ok(Self::I32RemS),
+                0x70 => Ok(Self::I32RemU),
+                0x71 => Ok(Self::I32And),
+                0x72 => Ok(Self::I32Or),
+                0x73 => Ok(Self::I32Xor),
+                0x74 => Ok(Self::I32Shl),
+                0x75 => Ok(Self::I32ShrS),
+                0x76 => Ok(Self::I32ShrU),
+                0x77 => Ok(Self::I32Rotl),
+                0x78 => Ok(Self::I32Rotr),
+                0x79 => Ok(Self::I64Clz),
+                0x7A => Ok(Self::I64Ctz),
+                0x7B => Ok(Self::I64Popcnt),
+                0x7C => Ok(Self::I64Add),
+                0x7D => Ok(Self::I64Sub),
+                0x7E => Ok(Self::I64Mul),
+                0x7F => Ok(Self::I64DivS),
+                0x80 => Ok(Self::I64DivU),
+                0x81 => Ok(Self::I64RemS),
+                0x82 => Ok(Self::I64RemU),
+                0x83 => Ok(Self::I64And),
+                0x84 => Ok(Self::I64Or),
+                0x85 => Ok(Self::I64Xor),
+                0x86 => Ok(Self::I64Shl),
+                0x87 => Ok(Self::I64ShrS),
+                0x88 => Ok(Self::I64ShrU),
+                0x89 => Ok(Self::I64Rotl),
+                0x8A => Ok(Self::I64Rotr),
+                0x8B => Ok(Self::F32Abs),
+                0x8C => Ok(Self::F32Neg),
+                0x8D => Ok(Self::F32Ceil),
+                0x8E => Ok(Self::F32Floor),
+                0x8F => Ok(Self::F32Trunc),
+                0x90 => Ok(Self::F32Nearest),
+                0x91 => Ok(Self::F32Sqrt),
+                0x92 => Ok(Self::F32Add),
+                0x93 => Ok(Self::F32Sub),
+                0x94 => Ok(Self::F32Mul),
+                0x95 => Ok(Self::F32Div),
+                0x96 => Ok(Self::F32Min),
+                0x97 => Ok(Self::F32Max),
+                0x98 => Ok(Self::F32Copysign),
+                0x99 => Ok(Self::F64Abs),
+                0x9A => Ok(Self::F64Neg),
+                0x9B => Ok(Self::F64Ceil),
+                0x9C => Ok(Self::F64Floor),
+                0x9D => Ok(Self::F64Trunc),
+                0x9E => Ok(Self::F64Nearest),
+                0x9F => Ok(Self::F64Sqrt),
+                0xA0 => Ok(Self::F64Add),
+                0xA1 => Ok(Self::F64Sub),
+                0xA2 => Ok(Self::F64Mul),
+                0xA3 => Ok(Self::F64Div),
+                0xA4 => Ok(Self::F64Min),
+                0xA5 => Ok(Self::F64Max),
+                0xA6 => Ok(Self::F64Copysign),
+                0xA7 => Ok(Self::I32WrapI64),
+                0xA8 => Ok(Self::I32TruncF32S),
+                0xA9 => Ok(Self::I32TruncF32U),
+                0xAA => Ok(Self::I32TruncF64S),
+                0xAB => Ok(Self::I32TruncF64U),
+                0xAC => Ok(Self::I64ExtendI32S),
+                0xAD => Ok(Self::I64ExtendI32U),
+                0xAE => Ok(Self::I64TruncF32S),
+                0xAF => Ok(Self::I64TruncF32U),
+                0xB0 => Ok(Self::I64TruncF64S),
+                0xB1 => Ok(Self::I64TruncF64U),
+                0xB2 => Ok(Self::F32ConvertI32S),
+                0xB3 => Ok(Self::F32ConvertI32U),
+                0xB4 => Ok(Self::F32ConvertI64S),
+                0xB5 => Ok(Self::F32ConvertI64U),
+                0xB6 => Ok(Self::F32DemoteF64),
+                0xB7 => Ok(Self::F64ConvertI32S),
+                0xB8 => Ok(Self::F64ConvertI32U),
+                0xB9 => Ok(Self::F64ConvertI64S),
+                0xBA => Ok(Self::F64ConvertI64U),
+                0xBB => Ok(Self::F64PromoteF32),
+                0xBC => Ok(Self::I32ReinterpretF32),
+                0xBD => Ok(Self::I64ReinterpretF64),
+                0xBE => Ok(Self::F32ReinterpretI32),
+                0xBF => Ok(Self::F64ReinterpretI64),
 
             actual => Err(DecodingError::InvalidInstr { actual })
         }
     }
 
-    /// Validates the current instruction.
     pub(crate) fn validate(&self, validator: &mut Validator) -> Result<(), ValidationError> {
         match self {
             // Numeric Instructions
@@ -693,7 +818,7 @@ impl Instr {
                     }
 
                     validator.push_opd(ValType::I32);
-                }
+                },
 
                 Self::MemoryGrow => {
                     if validator.mems.is_empty() {
@@ -702,66 +827,49 @@ impl Instr {
 
                     validator.pop_opd_expect(ValType::I32)?;
                     validator.push_opd(ValType::I32);
-                }
+                },
             
             // Control Instructions
                 Self::Nop => (),
 
                 Self::Unreachable => validator.unreachable()?,
 
-                Self::Block(block_type, instructions) => {
-                    let end_types: Vec<ValType> = (*block_type).into();
+                Self::Block(block_type) => validator.push_ctrl(block_type.to_vec(), block_type.to_vec(), false),
 
-                    // label and end types are the same for block control constructs
-                    validator.push_ctrl(end_types.clone(), end_types);
+                Self::Loop(block_type) => validator.push_ctrl(vec![], block_type.to_vec(), false),
 
-                    // validate body
-                    for instr in instructions {
-                        instr.validate(validator)?;
-                    }
-
-                    let end_types = validator.pop_ctrl()?;
-                    validator.push_opds(end_types);
-                },
-
-                Self::Loop(block_type, instructions) => {
-                    let end_types: Vec<ValType> = (*block_type).into();
-
-                    // label types are empty for loops
-                    validator.push_ctrl(vec![], end_types);
-
-                    // validate body
-                    for instr in instructions {
-                        instr.validate(validator)?;
-                    }
-
-                    let end_types = validator.pop_ctrl()?;
-                    validator.push_opds(end_types);
-                },
-
-                Self::If(block_type, then_block, else_block) => {
-                    let end_types: Vec<ValType> = (*block_type).into();
-
+                Self::If(block_type, _) => {
                     // pop condition
                     validator.pop_opd_expect(ValType::I32)?;
-
-                    // both the 'then' and 'else' block are expected to produce the end types
-                    for block in [then_block, else_block] {
-                        // both blocks have the same label and end types
-                        validator.push_ctrl(end_types.clone(), end_types.clone());
-
-                        // validate instructions in blocks
-                        for instr in block {
-                            instr.validate(validator)?;
-                        }
-
-                        validator.pop_ctrl()?;
-                    }
-
-                    validator.push_opds(end_types);
+                    validator.push_ctrl(block_type.to_vec(), block_type.to_vec(), true);
                 },
 
-                Self::Br(index) => {
+                Self::Else(_) => {
+                    let frame = validator.ctrls
+                        .last()
+                        .cloned()
+                        .ok_or(ValidationError::ExpectedControlFrame)?;
+
+                    // this shouldn't trigger since the frame before 'else' in the decoder is verified to be an 'if' construct.
+                    if !frame.is_if {
+                        panic!("control frame should be an 'if' control construct.");
+                    }
+
+                    // check that then-branch exited with the end types left on the stack.
+                    validator.pop_opds(frame.end_types.clone())?;
+
+                    // should be back at the height where we entered the then-branch.
+                    if validator.opds.len() != frame.height {
+                        return Err(ValidationError::StackHeightMismatch { expect: frame.height, actual: validator.opds.len() });
+                    }
+
+                    let frame = validator.ctrls.last_mut().unwrap();
+
+                    frame.else_seen = true;
+                    frame.unreachable = false; // in-case the then-block was unreachable
+                },
+
+                Self::Br(_, index) => {
                     // branch to the targetted control frame and expect the label types on the opd stack
                     let target_ctrl_frame = validator.get_ctrl(*index)?;
                     
@@ -771,7 +879,7 @@ impl Instr {
                     validator.unreachable()?;
                 },
 
-                Self::BrIf(index) => {
+                Self::BrIf(_, index) => {
                     // pop condition
                     validator.pop_opd_expect(ValType::I32)?;
 
@@ -786,7 +894,7 @@ impl Instr {
                     validator.push_opds(label_types);
                 },
 
-                Self::BrTable(label_indices, fallback_index) => {
+                Self::BrTable(_, _, label_indices, fallback_index) => {
                     // pop selector index
                     validator.pop_opd_expect(ValType::I32)?;
 
@@ -811,7 +919,8 @@ impl Instr {
                     validator.unreachable()?;
                 },
 
-                Self::Return => Self::Br(validator.ctrls.len() as u32 - 1).validate(validator)?,
+                // doesn't matter what we put for the first value
+                Self::Return => Self::Br(0, validator.ctrls.len() as u32 - 1).validate(validator)?,
 
                 Self::Call(func_idx) => {
                     let func_idx = *func_idx as usize;
@@ -850,130 +959,132 @@ impl Instr {
                     // pop params, push results
                     validator.pop_opds(params)?;
                     validator.push_opds(results);
+                },
+
+                Self::End => {
+                    let frame = validator.ctrls
+                        .last()
+                        .ok_or(ValidationError::ExpectedControlFrame)?;
+
+                    if !frame.else_seen && frame.is_if && !frame.end_types.is_empty() {
+                        // there was an 'if', but no 'else', the end types should be empty
+                        return Err(ValidationError::ExpectedEmptyIfEndTypes { actual: frame.end_types.clone() });
+                    }
+
+                    let end_types = validator.pop_ctrl()?;
+                    validator.push_opds(end_types);
                 }
         }
-        
+
         Ok(())
     }
 
-    /// Executes the sequence of instructions.
-    /// The level is the current 
-    pub(crate) fn execute_sequence(
-        instructions: &[Instr], 
-        executor: &mut Executor, 
-        level: usize,
-        store: &mut Store,
-        module: Rc<ModuleInstance>
-    ) -> Result<Option<usize>, ExecutionError> {
-        for instr in instructions {
-            match instr {
-                // Control Instructions
-                    Instr::Unreachable => return Err(ExecutionError::Trapped(TrapReason::Unreachable)),
-                    Instr::Nop => {},
-                    Instr::Block(block_type, body) => {
-                        let prev_block = executor.enter_block(block_type.arity());
+    pub(crate) fn execute(&self, executor: &mut Executor, store: &mut Store, module: Rc<ModuleInstance>) -> Result<(), ExecutionError> {
+        match self {
+            // Control Instructions
+                Instr::Unreachable => return Err(ExecutionError::Trapped(TrapReason::Unreachable)),
+                Instr::Nop => {},
 
-                        let branch_target = Self::execute_sequence(body, executor, level + 1, store, Rc::clone(&module))?;
+                Instr::Block(block_type) => executor.push_block(block_type.arity(), LabelKind::Block),
+                Instr::Loop(block_type) => executor.push_block(block_type.arity(), LabelKind::Loop),
+                
+                Instr::If(block_type, else_pc) => {
+                    let condition_is_true = executor.pop_value()?.as_i32() != 0;
 
-                        // check if we're unwinding past this block
-                        let unwinding = branch_target.is_some_and(|target| target <= level);
-                        
-                        executor.exit_block(prev_block, unwinding);
+                    executor.push_block(block_type.arity(), LabelKind::If);
 
-                        // if we're unwinding past this level, we should propagate the branch target up
-                        if unwinding {
-                            return Ok(branch_target);
-                        }
-                    },
-                    Instr::Loop(block_type, body) => {
-                        let prev_block = executor.enter_block(block_type.arity());
-                        let loop_block_level = level + 1; // the level the loop body executes at
+                    // jump to else if the condition is false
+                    if !condition_is_true {
+                        let curr_frame = executor.frames.last_mut()
+                            .ok_or(ExecutionError::UnexpectedStackUnderflow(RuntimeStack::Frame))?;
 
-                        loop {
-                            let branch_target = Self::execute_sequence(body, executor, loop_block_level, store, Rc::clone(&module))?;
-
-                            // if the branch target is the loop's body, we loop again
-                            if branch_target.is_some_and(|target| target == loop_block_level) {
-                                continue;
-                            }
-
-                            let unwinding = branch_target.is_some_and(|target| target <= level);
-                            
-                            executor.exit_block(prev_block, unwinding);
-
-                            if unwinding {
-                                return Ok(branch_target);
-                            }
-
-                            break; // loops only loop through branches.
-                        }
-                    },
-                    Instr::If(block_type, then_block, else_block) => {
-                        let condition_is_true = executor.pop_value()?.as_i32() != 0;
-                        let prev_block = executor.enter_block(block_type.arity());
-
-                        // execute corresponding block based on condition
-                        let branch_target = if condition_is_true {
-                            Self::execute_sequence(then_block, executor, level + 1, store, Rc::clone(&module))?
-                        } else {
-                            Self::execute_sequence(else_block, executor, level + 1, store, Rc::clone(&module))?
-                        };
-
-                        let unwinding = branch_target.is_some_and(|target| target <= level);
-                        executor.exit_block(prev_block, unwinding);
-
-                        if unwinding {
-                            return Ok(branch_target);
-                        }
-                    },
-                    Instr::Br(label_idx) => return Ok(Some(level - *label_idx as usize)),
-                    Instr::BrIf(label_idx) => {
-                        let condition_is_true = executor.pop_value()?.as_i32() != 0;
-
-                        if condition_is_true {
-                            return Ok(Some(level - *label_idx as usize));
-                        }
-                    },
-                    Instr::BrTable(label_indices, fallback_label_idx) => {
-                        let selector_idx = executor.pop_value()?.as_i32() as usize;
-
-                        // branch to label index at selector index if it exists in the array, otherwise use the fallback.
-                        if selector_idx < label_indices.len() {
-                            return Ok(Some(level - label_indices[selector_idx] as usize));
-                        }
-
-                        return Ok(Some(level - *fallback_label_idx as usize));
+                        curr_frame.pc = *else_pc as usize;
                     }
-                    Instr::Return => return Ok(Some(0)),
-                    Instr::Call(func_idx) => executor.execute_function(module.func_addrs[*func_idx as usize], store)?,
-                    Instr::CallIndirect(func_type_idx) => {
-                        // function type should exist due to validation
-                        let expect_func_type = &module.types[*func_type_idx as usize];
-                        let func_idx = executor.pop_value()?.as_i32() as usize;
+                },
 
-                        // table should exist due to validation
-                        let table = &store.tables[module.table_addrs[0]];
+                Instr::Else(target_pc) => {
+                    executor.frames.last_mut().unwrap().pc = *target_pc as usize
+                },
 
-                        let func_addr = table.elem.get(func_idx)
-                            .ok_or(ExecutionError::Trapped(TrapReason::UndefinedElement { index: func_idx }))?
-                            .ok_or(ExecutionError::Trapped(TrapReason::UninitializedElement { index: func_idx }))?;
-                        
-                        // all indexes in element segments were validated at validation time
-                        let func = &store.funcs[func_addr];
+                Instr::End => {
+                    // keep return values
+                    let block = executor.pop_block()?;
+                    executor.values.drain(block.values_start..executor.values.len() - block.arity);
+                },
 
-                        let actual_func_type = match func {
-                            FuncInstance::Host {func_type, ..} => func_type,
-                            FuncInstance::Wasm { func_type, .. } => func_type
-                        };
+                Instr::Br(target_pc, depth) => {
+                    let target_block_index = executor.blocks.len() - 1 - *depth as usize;
+                    let target_block = executor.blocks[target_block_index];
 
-                        // the func type in the table should match the one at the given type index.
-                        if *expect_func_type != **actual_func_type {
-                            return Err(ExecutionError::Trapped(TrapReason::IndirectCallTypeMismatch { expect: expect_func_type.clone(), actual: (**actual_func_type).clone() }))
-                        }
+                    // number of values to keep when we branch to the block
+                    let is_loop = target_block.kind == LabelKind::Loop;
+                    let keep = if is_loop { 0 } else { target_block.arity };
 
-                        executor.execute_function(func_addr, store)?;
-                    },
+                    executor.values.drain(target_block.values_start..executor.values.len() - keep);
 
+                    executor.blocks.truncate(target_block_index);
+
+                    let last_frame = executor.frames.last_mut()
+                        .ok_or(ExecutionError::UnexpectedStackUnderflow(RuntimeStack::Frame))?;
+
+                    last_frame.pc = *target_pc as usize;
+                },
+                Instr::BrIf(target_pc, depth) => {
+                    let condition_is_true = executor.pop_value()?.as_i32() != 0;
+
+                    if condition_is_true {
+                        return Self::Br(*target_pc, *depth).execute(executor, store, module);
+                    }
+                },
+                Instr::BrTable(targets_pcs, default_target_pc, depths, default_depth) => {
+                    let selector_idx = executor.pop_value()?.as_i32() as usize;
+
+                    // branch to label index at selector index if it exists in the array, otherwise use fallback
+                    let (target_pc, depth) = match targets_pcs.get(selector_idx) {
+                        Some(&t) => (t, depths[selector_idx]),
+                        None => (*default_target_pc, *default_depth),
+                    };
+
+                    return Self::Br(target_pc, depth).execute(executor, store, module);
+                },
+                Instr::Return => {
+                    let frame = executor.frames.last()
+                        .ok_or(ExecutionError::UnexpectedStackUnderflow(RuntimeStack::Frame))?;
+
+                    // remove every block in the function (and temporaries since it skips Instr::End)
+                    executor.values.drain(frame.values_start..executor.values.len() - frame.arity);
+                    executor.blocks.truncate(frame.blocks_start);
+
+                    executor.frames.last_mut().unwrap().pc = frame.code.body.instructions.len(); // to trigger pop_frame()
+                },
+                Instr::Call(func_idx) => executor.execute_function(module.func_addrs[*func_idx as usize], store, false)?,
+                Instr::CallIndirect(func_type_idx) => {
+                    // function type should exist due to validation
+                    let expect_func_type = &module.types[*func_type_idx as usize];
+                    let func_idx = executor.pop_value()?.as_i32() as usize;
+
+                    // table should exist due to validation
+                    let table = &store.tables[module.table_addrs[0]];
+
+                    let func_addr = table.elem.get(func_idx)
+                        .ok_or(ExecutionError::Trapped(TrapReason::UndefinedElement { index: func_idx }))?
+                        .ok_or(ExecutionError::Trapped(TrapReason::UninitializedElement { index: func_idx }))?;
+                    
+                    // all indexes in element segments were validated at validation time
+                    let func = &store.funcs[func_addr];
+
+                    let actual_func_type = match func {
+                        FuncInstance::Host {func_type, ..} => func_type,
+                        FuncInstance::Wasm { func_type, .. } => func_type
+                    };
+
+                    // the func type in the table should match the one at the given type index.
+                    if *expect_func_type != **actual_func_type {
+                        return Err(ExecutionError::Trapped(TrapReason::IndirectCallTypeMismatch { expect: expect_func_type.clone(), actual: (**actual_func_type).clone() }))
+                    }
+
+                    executor.execute_function(func_addr, store, false)?;
+                },
                 // Parametric Instructions
                     Self::Drop => { executor.pop_value()?; },
                     Self::Select => {
@@ -991,19 +1102,28 @@ impl Instr {
                 
                 // Select Instructions (all locals and globals accessed exist due to validation)
                     Instr::LocalGet(local_idx) => {
-                        let local = executor.locals[executor.current_frame.locals_start + *local_idx as usize];
+                        let current_frame = executor.frames.last()
+                            .ok_or(ExecutionError::UnexpectedStackUnderflow(RuntimeStack::Frame))?;
+
+                        let local = executor.locals[current_frame.locals_start + *local_idx as usize];
                         
                         executor.push_value(local);
                     },
                     Instr::LocalSet(local_idx) => {
                         let val = executor.pop_value()?;
 
-                        executor.locals[executor.current_frame.locals_start + *local_idx as usize] = val;
+                        let current_frame = executor.frames.last()
+                            .ok_or(ExecutionError::UnexpectedStackUnderflow(RuntimeStack::Frame))?;
+
+                        executor.locals[current_frame.locals_start + *local_idx as usize] = val;
                     },
                     Instr::LocalTee(local_idx) => {
                         let val = executor.peek_value()?;
 
-                        executor.locals[executor.current_frame.locals_start + *local_idx as usize] = val;
+                        let current_frame = executor.frames.last()
+                            .ok_or(ExecutionError::UnexpectedStackUnderflow(RuntimeStack::Frame))?;
+
+                        executor.locals[current_frame.locals_start + *local_idx as usize] = val;
                     },
                     Instr::GlobalGet(global_idx) => {
                         let global = &store.globals[module.global_addrs[*global_idx as usize]];
@@ -1398,22 +1518,18 @@ impl Instr {
                     Instr::I64ReinterpretF64 => executor.cvtop_from_f64(|v| Val::I64(v.to_bits() as i64))?,
                     Instr::F32ReinterpretI32 => executor.cvtop_from_i32(|v| Val::F32(f32::from_bits(v as u32)))?,
                     Instr::F64ReinterpretI64 => executor.cvtop_from_i64(|v| Val::F64(f64::from_bits(v as u64)))?,
-            }
         }
-        Ok(None)
+        Ok(())
     }
 
-    /// Decodes a sequence of instructions until it reaches the end marker.
-    fn decode_sequence(reader: &mut Reader) -> Result<Vec<Instr>, DecodingError> {
-        let mut instr: Vec<Instr> = Vec::new();
-
-        while reader.peek_byte()? != Self::END_MARKER {
-            instr.push(Self::decode(reader)?);
+    /// Patches the branch with the given patch site to go to 'target'.
+    fn patch_branch(code: &mut [Instr], site: PatchSite, target: u32) {
+        match site {
+            PatchSite::Br(pc) => if let Self::Br(t, _) = &mut code[pc] { *t = target; },
+            PatchSite::BrIf(pc) => if let Self::BrIf(t, _) = &mut code[pc] { *t = target; },
+            PatchSite::BrTableEntry(pc, entry) => if let Self::BrTable(targets, _, _, _) = &mut code[pc] { targets[entry] = target; },
+            PatchSite::BrTableDefault(pc) => if let Self::BrTable(_, default, _, _) = &mut code[pc] { *default = target; },
         }
-
-        reader.match_byte(Self::END_MARKER, DecodingError::ExpectedEndOfInstrSeq { actual: reader.peek_byte()? })?;
-
-        Ok(instr)
     }
 
     /// Returns the corresponding ValType for the current numeric instruction.
