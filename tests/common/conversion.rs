@@ -1,7 +1,7 @@
 use std::{fs, path::Path, process::Command};
 
-const SPEC_INPUT_DIR: &'static str = "tests/spec";
-pub const SPEC_OUTPUT_DIR: &'static str = "tests/spec-generated";
+const SPEC_INPUT_DIR: &'static str = "tests/assets/spec";
+pub const SPEC_OUTPUT_DIR: &'static str = "tests/assets/spec-generated";
 
 /// Converts all `SPEC_INPUT_DIR`/*.wast to `SPEC_OUTPUT_DIR`/*.json.
 pub fn convert_wasts() {

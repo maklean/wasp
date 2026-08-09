@@ -5,7 +5,7 @@ use wasp::{errors::{ExecutionError, TrapReason}, module::Module, runtime::{Exter
 
 #[test]
 fn simple_arithmetic() {
-    let mut module = Module::decode_from_file("examples/binaries/simple_arithmetic.wasm")
+    let mut module = Module::decode_from_file("tests/assets/examples/binaries/simple_arithmetic.wasm")
         .expect("simple_arithmetic module should decode properly.");
 
     module.validate()
@@ -36,7 +36,7 @@ fn simple_arithmetic() {
 
 #[test]
 fn host_function_imports() {
-    let mut module = Module::decode_from_file("examples/binaries/host_function_imports.wasm")
+    let mut module = Module::decode_from_file("tests/assets/examples/binaries/host_function_imports.wasm")
         .expect("host_function_imports module should decode properly.");
 
     module.validate()
