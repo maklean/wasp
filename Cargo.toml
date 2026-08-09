@@ -2,9 +2,10 @@
 name = "wasp"
 version = "0.1.0"
 edition = "2024"
-description = "A WebAssembly interpreter written in Rust, compliant with the 1.0 spec."
+description = "A WebAssembly runtime written in Rust, compliant with the 1.0 spec."
 
 [dev-dependencies]
+rand = "0.10.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 

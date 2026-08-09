@@ -9,7 +9,7 @@ pub type Addr = usize;
 pub type FuncElem = Option<Addr>;
 
 /// Runtime representation of a Wasm value.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Val {
     I32(i32),
     I64(i64),
