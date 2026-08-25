@@ -19,17 +19,17 @@ private:
 
     // Recursive case - populate TypedMetaVarList::m_mvl
     template<typename CurrMetaVarType, typename... RemainingMetaVarTypes>
-    void BuildMetaVarList(CurrMetaVarType curr, RemainingMetaVarTypes remaining) {
+    void BuildMetaVarList(CurrMetaVarType curr, RemainingMetaVarTypes... remaining) {
         m_mvl.push_back(curr);
         BuildMetaVarList(remaining...);
     }
 
-    TypedMetaVarList(TypedMetaVarList<metaVarTypes>... metavars) {
+    TypedMetaVarList(TypedMetaVar<metaVarTypes>... metavars) {
         BuildMetaVarList(metavars...);
     }
 public:
     // Creates a TypedMetaVarList from a sequence of TypedMetaVar.
-    template<auto _metaVarTypes>
+    template<auto... _metaVarTypes>
     friend TypedMetaVarList<_metaVarTypes...> CreateMetaVarList(TypedMetaVar<_metaVarTypes>... metavars);
 
     // Generates a MetaVarMaterializedList from a TypedMetaVarList and a Materializer/StencilGenerator
@@ -46,7 +46,7 @@ public:
 
 template<auto... metaVarTypes>
 TypedMetaVarList<metaVarTypes...> CreateMetaVarList(TypedMetaVar<metaVarTypes>... metavars) {
-    static_assert(sizeof...(metaVarTypes) > 0, "Cannot create MetaVarList from empty list of metavars.");
+    static_assert(sizeof...(metaVarTypes) > 0, "Cannot create TypedMetaVarList from empty list of metavars.");
     
     return TypedMetaVarList<metaVarTypes...>(metavars...);
 }

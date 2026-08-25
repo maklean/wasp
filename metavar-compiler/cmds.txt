@@ -1,0 +1,2 @@
+compile stencils entry point to LLVM IR:
+    mkdir -p output && clang++ -std=c++17 -O3 -fno-pic -fno-pie -mcmodel=medium -emit-llvm -c src/library/stencils_entry.cpp -o output/stencils.bc

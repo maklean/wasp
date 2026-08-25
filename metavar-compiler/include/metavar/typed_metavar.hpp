@@ -3,6 +3,7 @@
 #include "../utils/opaque_params.hpp"
 
 #include <type_traits>
+#include <typeinfo>
 
 namespace wasp {
 

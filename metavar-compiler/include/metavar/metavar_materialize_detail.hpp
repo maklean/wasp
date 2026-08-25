@@ -50,6 +50,10 @@ struct metavar_prefix_cond_fn_checker {
             struct impl5 : std::integral_constant<bool, (T::template cond<TArgs..., VArgs...>())> {};
         };
     };
+
+    // to get the value easily
+    template<auto... VArgs>
+    using impl = typename impl3<VArgs...>::template impl4<void>::impl5;
 };
 
 // Gets the function address of the StencilGenerator::f() function given a valid sequence of type and value arguments.

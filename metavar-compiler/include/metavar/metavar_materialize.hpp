@@ -34,7 +34,7 @@ struct metavar_materialize_helper {
                 // Matches the invalid stencil configurations (the ones that fail cond())
                 template<typename Dummy, typename Enable = void>
                 struct impl4 {
-                    static void invoke(MetaVarMaterializedList* result, const PartialMetaVarValueInstance& instance) {}
+                    static void invoke(MetaVarMaterializedList* result, const PartialMetaVarInstance& instance) {}
                 };
 
                 // Matches the valid stencil configurations (the ones that pass cond())
@@ -49,7 +49,7 @@ struct metavar_materialize_helper {
                             ::template impl<Materializer, TArgs...>::template impl2<VArgs...>;
                         
                         // metavar values list should be parallel to the stencil generator's metavar list
-                        ReleaseAssert(instance.value.size() == result->m_metavars.size());
+                        ReleaseAssert(instance.m_values.size() == result->m_metavars.size());
 
                         MetaVarMaterializedInstance inst;
 
@@ -189,7 +189,7 @@ struct metavar_materialize_helper<Materializer, metaVarTypes...>::impl<numIntegr
                 !metavar_prefix_cond_fn_checker<Materializer, TArgs...>::template impl<VArgs...>::value)>::type
             >
             {
-                static void invoke(MetaVarMaterializedList* result, const PartialMetaVarValueInstance& instance) {}
+                static void invoke(MetaVarMaterializedList* result, const PartialMetaVarInstance& instance) {}
             };
         };
     };

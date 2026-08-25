@@ -1,7 +1,7 @@
 #pragma once
 
 #include "typed_metavar.hpp"
-#include "function_attributes.hpp"
+#include "../utils/function_attributes.hpp"
 
 #include <vector>
 #include <cstdint>
