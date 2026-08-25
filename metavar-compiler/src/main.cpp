@@ -199,5 +199,9 @@ std::unordered_set<std::string> retrieveStencilSymbolNames(const char* executabl
         }
     }
 
+    #ifdef LOG_OUTPUT
+        std::cout << "[LOG] Retrieved all " << stencilSymbolNames.size() << " stencil functions symbol names.\n";
+    #endif
+
     return stencilSymbolNames;
 }
