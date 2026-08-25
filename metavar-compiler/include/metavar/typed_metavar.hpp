@@ -50,13 +50,13 @@ public:
         Creates a `TypedMetaVar` for a `WASM_PRIMITIVE_TYPE` MetaVar.
         All Wasm primitive types (i32, i64, f32, f64) will be later enumerated.
     */
-    friend TypedMetaVar<MetaVarType::WASM_PRIMITIVE_TYPE> CreatePrimitiveTypeMetaVar(const char* name);
+    friend inline TypedMetaVar<MetaVarType::WASM_PRIMITIVE_TYPE> CreatePrimitiveTypeMetaVar(const char* name);
 
     /*
         Creates a `TypedMetaVar` for a `BOOL` MetaVar.
         All boolean values (false, true) will be later enumerated.
     */
-    friend TypedMetaVar<MetaVarType::BOOL> CreateBoolMetaVar(const char* name);
+    friend inline TypedMetaVar<MetaVarType::BOOL> CreateBoolMetaVar(const char* name);
 
     /*
         Creates an enum `TypedMetaVar` for a max integral parameter count.
@@ -93,7 +93,7 @@ TypedMetaVar<enumUpperBoundExclusive> CreateEnumMetaVar(const char* name) {
     return ret;
 }
 
-TypedMetaVar<MetaVarType::WASM_PRIMITIVE_TYPE> CreatePrimitiveTypeMetaVar(const char* name) {
+inline TypedMetaVar<MetaVarType::WASM_PRIMITIVE_TYPE> CreatePrimitiveTypeMetaVar(const char* name) {
     TypedMetaVar<MetaVarType::WASM_PRIMITIVE_TYPE> ret;
 
     ret.m_type = MetaVarType::WASM_PRIMITIVE_TYPE;
@@ -102,7 +102,7 @@ TypedMetaVar<MetaVarType::WASM_PRIMITIVE_TYPE> CreatePrimitiveTypeMetaVar(const 
     return ret;
 }
 
-TypedMetaVar<MetaVarType::BOOL> CreateBoolMetaVar(const char* name) {
+inline TypedMetaVar<MetaVarType::BOOL> CreateBoolMetaVar(const char* name) {
     // create TypedMetaVar
     TypedMetaVar<MetaVarType::BOOL> ret;
 
