@@ -184,13 +184,9 @@ std::unordered_set<std::string> retrieveStencilSymbolNames(const char* executabl
     }
 
     // get the symbol names of every stencil function
-
-    size_t totalCount{}; // the total number of stencil functions
     std::unordered_set<std::string> stencilSymbolNames;
 
     for(const auto& bp: packs) {
-        totalCount += bp.m_data.m_instances.size();
-
         for(const auto& inst: bp.m_data.m_instances) {
             uint64_t stencilFuncAddr = reinterpret_cast<uint64_t>(inst.m_fnPtr);
 
@@ -202,10 +198,6 @@ std::unordered_set<std::string> retrieveStencilSymbolNames(const char* executabl
             stencilSymbolNames.insert(std::string { addrToSym[stencilFuncAddr] });
         }
     }
-
-    #ifdef LOG_OUTPUT
-        std::cout << "[LOG] Retrieved " << stencilSymbolNames.size() << '/' << totalCount << " stencil functions symbol names.\n";
-    #endif
 
     return stencilSymbolNames;
 }
