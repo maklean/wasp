@@ -33,6 +33,7 @@
 #include <memory>
 
 #define DEFAULT_ENTRY_POINT_DIR "output/stencils_entry.bc"
+#define DEFAULT_STENCILS_OBJ_FILE_DIR "output/stencils.o"
 
 // Initializes all the necessary tools in LLVM.
 void initLLVM(int argc, char** argv);
@@ -40,12 +41,18 @@ void initLLVM(int argc, char** argv);
 // Executes the stencil library entry point using LLJIT, returns a set of the symbol names of all generated stencil functions.
 std::unordered_set<std::string> retrieveStencilSymbolNames(const char* executableDir, std::string_view entryPointDir);
 
+// Emits an object file (compiled with the GHC calling convention) containing all (given) generated stencil functions.
+void emitStencilObjFile(const std::unordered_set<std::string>& stencilSymbolNames, const char* executableDir, std::string_view entryPointDir, std::string_view objFileDir);
+
 int main(int argc, char** argv) {
     initLLVM(argc, argv);
 
     std::string_view entryPointDir = argc >= 2 ? argv[1] : DEFAULT_ENTRY_POINT_DIR;
+    std::string_view objFileDir = argc >= 3 ? argv[2] : DEFAULT_STENCILS_OBJ_FILE_DIR;
 
     auto set = retrieveStencilSymbolNames(argv[0], entryPointDir);
+
+    emitStencilObjFile(set, argv[0], entryPointDir, objFileDir);
 
     return 0;
 }
@@ -204,4 +211,104 @@ std::unordered_set<std::string> retrieveStencilSymbolNames(const char* executabl
     #endif
 
     return stencilSymbolNames;
+}
+
+void emitStencilObjFile(const std::unordered_set<std::string>& stencilSymbolNames, const char* executableDir, std::string_view entryPointDir, std::string_view objFileDir) {
+    #ifdef LOG_OUTPUT
+        std::cout << '\n';
+    #endif
+
+    auto context = std::make_unique<llvm::LLVMContext>();
+
+    llvm::SMDiagnostic err;
+    auto module = llvm::parseIRFile(entryPointDir, err, *context);
+    if(!module) {
+        err.print(executableDir, llvm::errs());
+        exit(EXIT_FAILURE);
+    }
+
+    #ifdef LOG_OUTPUT
+        std::cout << "[LOG] Parsed stencil entry point into LLVM module.\n";
+
+        size_t setGHC{}, deletedBody{};
+    #endif
+
+    // Set calling convention of stencil functions to GHC, delete any other functions (so we get a smaller object file)
+    for(auto& func: module->functions()) {
+        if(func.isDeclaration()) continue;
+
+        std::string funcName = func.getName().str();
+        if(stencilSymbolNames.count(funcName)) {
+            func.setCallingConv(llvm::CallingConv::GHC);
+
+            #ifdef LOG_OUTPUT
+                setGHC++;
+            #endif
+        } else {
+            func.deleteBody();
+
+            #ifdef LOG_OUTPUT
+                deletedBody++;
+            #endif
+        }
+    }
+
+    #ifdef LOG_OUTPUT
+        std::cout << "[LOG] Set GHC Calling Convention (" << setGHC << " functions)" << " and removed any unused functions (" << deletedBody << " functions).\n";
+    #endif
+
+    // get target for the current (host) machine's architecture
+    std::string targetTriple = llvm::Triple(llvm::sys::getDefaultTargetTriple()).normalize();
+
+    std::string errorStr;
+    const llvm::Target* target = llvm::TargetRegistry::lookupTarget(targetTriple, errorStr);
+    if(!target) {
+        std::cerr << "Failed to get target: " << errorStr << '\n';
+        exit(EXIT_FAILURE);
+    }
+
+    // build target machine from target
+    llvm::TargetOptions options;
+    options.FunctionSections = true; // easier to deal with relocations if each stencil function is separated
+
+    auto targetMachine = std::unique_ptr<llvm::TargetMachine>(
+        target->createTargetMachine(
+            targetTriple,
+            "generic",
+            "",
+            options,
+            llvm::Reloc::Static,
+            llvm::CodeModel::Medium, // paper suggests -mcmodel=medium
+            llvm::CodeGenOptLevel::Aggressive // paper suggest -O3
+        )
+    );
+    
+    module->setDataLayout(targetMachine->createDataLayout());
+    module->setTargetTriple(targetTriple);
+
+    #ifdef LOG_OUTPUT
+        std::cout << "[LOG] Created target machine (" << targetTriple << ").\n";
+    #endif
+
+    // emit stencils object file
+    std::error_code ec;
+    llvm::raw_fd_ostream dest(objFileDir, ec, llvm::sys::fs::OF_None);
+
+    if(ec) {
+        std::cerr << "Could not open file: " << ec.message() << '\n';
+        exit(EXIT_FAILURE);
+    }
+
+    llvm::legacy::PassManager pass;
+    if(targetMachine->addPassesToEmitFile(pass, dest, nullptr, llvm::CodeGenFileType::ObjectFile)) {
+        std::cerr << "TargetMachine can't emit an object file for this target (" << targetTriple << ").\n";
+        exit(EXIT_FAILURE);
+    }
+
+    pass.run(*module);
+    dest.flush();
+
+    #ifdef LOG_OUTPUT
+        std::cout << "[LOG] Emitted stencils object file at: " << objFileDir << '\n';
+    #endif
 }
