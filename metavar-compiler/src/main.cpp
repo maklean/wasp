@@ -36,13 +36,13 @@
 #define DEFAULT_STENCILS_OBJ_FILE_DIR "output/stencils.o"
 
 // Initializes all the necessary tools in LLVM.
-void initLLVM(int argc, char** argv);
+static void initLLVM(int argc, char** argv);
 
 // Executes the stencil library entry point using LLJIT, returns a set of the symbol names of all generated stencil functions.
-std::unordered_set<std::string> retrieveStencilSymbolNames(const char* executableDir, std::string_view entryPointDir);
+static std::unordered_set<std::string> retrieveStencilSymbolNames(const char* executableDir, std::string_view entryPointDir);
 
 // Emits an object file (compiled with the GHC calling convention) containing all (given) generated stencil functions.
-void emitStencilObjFile(const std::unordered_set<std::string>& stencilSymbolNames, const char* executableDir, std::string_view entryPointDir, std::string_view objFileDir);
+static void emitStencilObjFile(const std::unordered_set<std::string>& stencilSymbolNames, const char* executableDir, std::string_view entryPointDir, std::string_view objFileDir);
 
 int main(int argc, char** argv) {
     initLLVM(argc, argv);
@@ -57,7 +57,7 @@ int main(int argc, char** argv) {
     return 0;
 }
 
-void initLLVM(int argc, char** argv) {
+static void initLLVM(int argc, char** argv) {
     llvm::InitLLVM(argc, argv);
 
     llvm::InitializeNativeTarget();
@@ -74,7 +74,7 @@ void initLLVM(int argc, char** argv) {
     #endif
 }
 
-std::unordered_set<std::string> retrieveStencilSymbolNames(const char* executableDir, std::string_view entryPointDir) {
+static std::unordered_set<std::string> retrieveStencilSymbolNames(const char* executableDir, std::string_view entryPointDir) {
     // create LLJIT instance
     auto jitOrErr = llvm::orc::LLJITBuilder().create();
     if(!jitOrErr) {
@@ -213,7 +213,7 @@ std::unordered_set<std::string> retrieveStencilSymbolNames(const char* executabl
     return stencilSymbolNames;
 }
 
-void emitStencilObjFile(const std::unordered_set<std::string>& stencilSymbolNames, const char* executableDir, std::string_view entryPointDir, std::string_view objFileDir) {
+static void emitStencilObjFile(const std::unordered_set<std::string>& stencilSymbolNames, const char* executableDir, std::string_view entryPointDir, std::string_view objFileDir) {
     #ifdef LOG_OUTPUT
         std::cout << '\n';
     #endif
