@@ -362,7 +362,7 @@ static std::unordered_map<uint64_t, std::vector<llvm::object::RelocationRef>> bu
     #ifdef LOG_OUTPUT
         std::cout << '\n';
     #endif
-    
+
     std::unordered_map<uint64_t, std::vector<llvm::object::RelocationRef>> relocMap;
     size_t totalRelocations{};
 
@@ -386,7 +386,7 @@ static std::unordered_map<uint64_t, std::vector<llvm::object::RelocationRef>> bu
     }
 
     #ifdef LOG_OUTPUT
-        std::cout << "Built relocation map for " << relocMap.size() << " sections (total relocations: " << totalRelocations << ").\n";
+        std::cout << "[LOG] Built relocation map for " << relocMap.size() << " sections (total relocations: " << totalRelocations << ").\n";
     #endif
 
     return relocMap;
