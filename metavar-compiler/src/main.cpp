@@ -1,8 +1,10 @@
 #include <iostream>
 
 #include "../include/library/stencil_registry.hpp"
+#include "../include/library/stencil_result.hpp"
 #include "../include/utils/debug.hpp"
 #include "../include/utils/fake_symbol_resolver.hpp"
+#include "../include/utils/asserts.hpp"
 
 #include <llvm/Support/InitLLVM.h>
 #include <llvm/Support/TargetSelect.h>
@@ -51,6 +53,9 @@ static std::pair<std::unique_ptr<llvm::object::ObjectFile>, llvm::object::ELF64L
 // Builds a relocation map from the stencils object file that maps section index to its relocations.
 static std::unordered_map<uint64_t, std::vector<llvm::object::RelocationRef>> buildRelocationMap(const std::unique_ptr<llvm::object::ObjectFile>& obj);
 
+// Builds the stencil library (maps stencil symbol name => Stencil)
+static std::unordered_map<std::string, Stencil> buildStencilLibrary(const std::unique_ptr<llvm::object::ObjectFile>& obj, llvm::object::ELF64LEObjectFile* elfObj, const std::unordered_set<std::string>& stencilSymbolNames);
+
 int main(int argc, char** argv) {
     initLLVM(argc, argv);
 
@@ -66,6 +71,8 @@ int main(int argc, char** argv) {
     auto elfObj = std::move(objs.second);
 
     auto relocationMap = buildRelocationMap(obj);
+
+    auto lib = buildStencilLibrary(obj, elfObj, set);
 
     return 0;
 }
@@ -390,4 +397,69 @@ static std::unordered_map<uint64_t, std::vector<llvm::object::RelocationRef>> bu
     #endif
 
     return relocMap;
+}
+
+static std::unordered_map<std::string, Stencil> buildStencilLibrary(const std::unique_ptr<llvm::object::ObjectFile>& obj, llvm::object::ELF64LEObjectFile* elfObj, const std::unordered_set<std::string>& stencilSymbolNames) {
+    #ifdef LOG_OUTPUT
+        std::cout << '\n';
+    #endif
+
+    std::unordered_map<std::string, Stencil> stencils;
+
+    // build Stencil for every stencil function
+    for(const llvm::object::SymbolRef& symbol: obj->symbols()) {
+        auto nameOrErr = symbol.getName();
+        if(!nameOrErr) {
+            llvm::consumeError(nameOrErr.takeError());
+            continue;
+        }
+
+        std::string symbolName = nameOrErr->str();
+        if(!stencilSymbolNames.count(symbolName)) continue;
+
+        llvm::object::ELFSymbolRef elfSym(symbol);
+        uint64_t symbolSize = elfSym.getSize();
+
+        auto symbolAddressOrErr = symbol.getAddress();
+        auto symbolSectionOrErr = symbol.getSection();
+
+        if(!symbolAddressOrErr || !symbolSectionOrErr) {
+            if(!symbolAddressOrErr) llvm::consumeError(symbolAddressOrErr.takeError());
+            if(!symbolSectionOrErr) llvm::consumeError(symbolSectionOrErr.takeError());
+
+            continue;
+        }
+        if(*symbolSectionOrErr == obj->section_end()) continue;
+
+        uint64_t symbolAddress = *symbolAddressOrErr;
+        auto symbolSectionIt = *symbolSectionOrErr;
+
+        auto sectionContentsOrErr = symbolSectionIt->getContents();
+        if(!sectionContentsOrErr) {
+            llvm::consumeError(sectionContentsOrErr.takeError());
+            continue;
+        }
+
+        llvm::StringRef sectionContents = *sectionContentsOrErr;
+        uint64_t sectionAddress = symbolSectionIt->getAddress();
+
+        // offset should be 0 and symbolSize should be the section size since every stencil function has its own section.
+        ReleaseAssert(symbolAddress - sectionAddress == 0 && symbolSize == sectionContents.size());
+
+        Stencil stencil;
+
+        stencil.m_name = symbolName;
+
+        // copy code from section into code buffer
+        const uint8_t* bytesStart = reinterpret_cast<const uint8_t*>(sectionContents.data());
+        const uint8_t* bytesEnd = bytesStart + symbolSize;
+
+        stencil.m_code.assign(bytesStart, bytesEnd);
+
+        // TODO: get relocation information for stencil, then put in stencil.m_relocations
+        
+        stencils.insert({ symbolName, stencil });
+    }
+
+    return stencils;
 }
