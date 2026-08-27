@@ -31,6 +31,7 @@
 #include <string_view>
 #include <cstdlib>
 #include <memory>
+#include <utility>
 
 #define DEFAULT_ENTRY_POINT_DIR "output/stencils_entry.bc"
 #define DEFAULT_STENCILS_OBJ_FILE_DIR "output/stencils.o"
@@ -44,6 +45,9 @@ static std::unordered_set<std::string> retrieveStencilSymbolNames(const char* ex
 // Emits an object file (compiled with the GHC calling convention) containing all (given) generated stencil functions.
 static void emitStencilObjFile(const std::unordered_set<std::string>& stencilSymbolNames, const char* executableDir, std::string_view entryPointDir, std::string_view objFileDir);
 
+// Loads and parses the stencils object file.
+static std::pair<std::unique_ptr<llvm::object::ObjectFile>, llvm::object::ELF64LEObjectFile*> parseStencilsObjectFile(std::string_view objFileDir);
+
 int main(int argc, char** argv) {
     initLLVM(argc, argv);
 
@@ -51,8 +55,12 @@ int main(int argc, char** argv) {
     std::string_view objFileDir = argc >= 3 ? argv[2] : DEFAULT_STENCILS_OBJ_FILE_DIR;
 
     auto set = retrieveStencilSymbolNames(argv[0], entryPointDir);
-
     emitStencilObjFile(set, argv[0], entryPointDir, objFileDir);
+
+    auto objs = parseStencilsObjectFile(objFileDir);
+
+    auto obj = std::move(objs.first);
+    auto elfObj = std::move(objs.second);
 
     return 0;
 }
@@ -311,4 +319,36 @@ static void emitStencilObjFile(const std::unordered_set<std::string>& stencilSym
     #ifdef LOG_OUTPUT
         std::cout << "[LOG] Emitted stencils object file at: " << objFileDir << '\n';
     #endif
+}
+
+static std::pair<std::unique_ptr<llvm::object::ObjectFile>, llvm::object::ELF64LEObjectFile*> parseStencilsObjectFile(std::string_view objFileDir) {
+    #ifdef LOG_OUTPUT
+        std::cout << '\n';
+    #endif
+
+    auto bufferOfErr = llvm::MemoryBuffer::getFile(objFileDir);
+    if(!bufferOfErr) {
+        std::cerr << "Failed to read stencils object file(" << objFileDir << ").\n";
+        exit(EXIT_FAILURE);
+    }
+
+    auto objOrErr = llvm::object::ObjectFile::createObjectFile(bufferOfErr.get()->getMemBufferRef());
+    if(!objOrErr) {
+        std::cerr << "Failed to parse stencils object file.\n";
+        exit(EXIT_FAILURE);
+    }
+
+    std::unique_ptr<llvm::object::ObjectFile> obj = std::move(objOrErr.get());
+    
+    auto* elfObj = llvm::dyn_cast<llvm::object::ELF64LEObjectFile>(obj.get());
+    if(!elfObj) {
+        std::cerr << "Failed casting to ELF64 object file.\n";
+        exit(EXIT_FAILURE);
+    }
+
+    #ifdef LOG_OUTPUT
+        std::cout << "[LOG] Loaded and parsed '" << objFileDir << "'\n";
+    #endif
+
+    return { std::move(obj), std::move(elfObj) };
 }
