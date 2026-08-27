@@ -48,6 +48,9 @@ static void emitStencilObjFile(const std::unordered_set<std::string>& stencilSym
 // Loads and parses the stencils object file.
 static std::pair<std::unique_ptr<llvm::object::ObjectFile>, llvm::object::ELF64LEObjectFile*> parseStencilsObjectFile(std::string_view objFileDir);
 
+// Builds a relocation map from the stencils object file that maps section index to its relocations.
+static std::unordered_map<uint64_t, std::vector<llvm::object::RelocationRef>> buildRelocationMap(const std::unique_ptr<llvm::object::ObjectFile>& obj);
+
 int main(int argc, char** argv) {
     initLLVM(argc, argv);
 
@@ -61,6 +64,8 @@ int main(int argc, char** argv) {
 
     auto obj = std::move(objs.first);
     auto elfObj = std::move(objs.second);
+
+    auto relocationMap = buildRelocationMap(obj);
 
     return 0;
 }
@@ -351,4 +356,38 @@ static std::pair<std::unique_ptr<llvm::object::ObjectFile>, llvm::object::ELF64L
     #endif
 
     return { std::move(obj), std::move(elfObj) };
+}
+
+static std::unordered_map<uint64_t, std::vector<llvm::object::RelocationRef>> buildRelocationMap(const std::unique_ptr<llvm::object::ObjectFile>& obj) {
+    #ifdef LOG_OUTPUT
+        std::cout << '\n';
+    #endif
+    
+    std::unordered_map<uint64_t, std::vector<llvm::object::RelocationRef>> relocMap;
+    size_t totalRelocations{};
+
+    for(const auto& section: obj->sections()) {
+        // skip over any section that isn't a relocation section
+        auto targetOrErr = section.getRelocatedSection();
+        if(!targetOrErr) {
+            llvm::consumeError(targetOrErr.takeError());
+            continue;
+        }
+
+        // map the targeted section's index to the list of relocations
+        auto target = *targetOrErr;
+        if(target == obj->section_end()) continue;
+
+        uint64_t targetIndex = target->getIndex();
+        for(const auto& relocation: section.relocations()) {
+            relocMap[targetIndex].push_back(relocation);
+            totalRelocations++;
+        }
+    }
+
+    #ifdef LOG_OUTPUT
+        std::cout << "Built relocation map for " << relocMap.size() << " sections (total relocations: " << totalRelocations << ").\n";
+    #endif
+
+    return relocMap;
 }
