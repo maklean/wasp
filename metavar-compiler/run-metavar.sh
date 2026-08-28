@@ -12,7 +12,7 @@ clang++ -std=c++17 -O3 -fno-pic -fno-pie -mcmodel=medium -emit-llvm -c src/libra
 
 # compile metavar compiler to executable
 echo "Compiling MetaVar Compiler to an executable..."
-clang++ -std=c++17 src/main.cpp src/library/stencil_registry.cpp src/utils/fake_symbol_resolver.cpp -o output/main \
+clang++ -std=c++17 src/main.cpp src/library/stencil_registry.cpp src/utils/fake_symbol_resolver.cpp src/utils/relocation_type_resolver.cpp -o output/main \
         $(llvm-config --cxxflags --ldflags --system-libs --libs core orcjit irreader support executionengine native target) \
         -ldl -lpthread
 

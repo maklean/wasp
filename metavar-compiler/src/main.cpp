@@ -5,6 +5,10 @@
 #include "../include/utils/debug.hpp"
 #include "../include/utils/fake_symbol_resolver.hpp"
 #include "../include/utils/asserts.hpp"
+#include "../include/utils/relocation_type_resolver.hpp"
+
+// nlohmann/json
+#include "../include/utils/json.hpp"
 
 #include <llvm/Support/InitLLVM.h>
 #include <llvm/Support/TargetSelect.h>
@@ -34,9 +38,11 @@
 #include <cstdlib>
 #include <memory>
 #include <utility>
+#include <fstream>
 
 #define DEFAULT_ENTRY_POINT_DIR "output/stencils_entry.bc"
 #define DEFAULT_STENCILS_OBJ_FILE_DIR "output/stencils.o"
+#define DEFAULT_JSON_MANIFEST_DIR "output/stencils.json"
 
 // Initializes all the necessary tools in LLVM.
 static void initLLVM(int argc, char** argv);
@@ -54,13 +60,22 @@ static std::pair<std::unique_ptr<llvm::object::ObjectFile>, llvm::object::ELF64L
 static std::unordered_map<uint64_t, std::vector<llvm::object::RelocationRef>> buildRelocationMap(const std::unique_ptr<llvm::object::ObjectFile>& obj);
 
 // Builds the stencil library (maps stencil symbol name => Stencil)
-static std::unordered_map<std::string, Stencil> buildStencilLibrary(const std::unique_ptr<llvm::object::ObjectFile>& obj, llvm::object::ELF64LEObjectFile* elfObj, const std::unordered_set<std::string>& stencilSymbolNames);
+static std::unordered_map<std::string, Stencil> buildStencilLibrary(
+    const std::unique_ptr<llvm::object::ObjectFile>& obj, 
+    llvm::object::ELF64LEObjectFile* elfObj, 
+    const std::unordered_set<std::string>& stencilSymbolNames,
+    const std::unordered_map<uint64_t, std::vector<llvm::object::RelocationRef>>& relocationMap
+);
+
+// Emits the JSON manifest from the stencil library hashmap.
+void emitJsonManifest(const std::unordered_map<std::string, Stencil>& stencilLibrary, std::string_view jsonFileDir);
 
 int main(int argc, char** argv) {
     initLLVM(argc, argv);
 
     std::string_view entryPointDir = argc >= 2 ? argv[1] : DEFAULT_ENTRY_POINT_DIR;
     std::string_view objFileDir = argc >= 3 ? argv[2] : DEFAULT_STENCILS_OBJ_FILE_DIR;
+    std::string_view jsonFileDir = argc >= 4 ? argv[3] : DEFAULT_JSON_MANIFEST_DIR;
 
     auto set = retrieveStencilSymbolNames(argv[0], entryPointDir);
     emitStencilObjFile(set, argv[0], entryPointDir, objFileDir);
@@ -72,7 +87,9 @@ int main(int argc, char** argv) {
 
     auto relocationMap = buildRelocationMap(obj);
 
-    auto lib = buildStencilLibrary(obj, elfObj, set);
+    auto lib = buildStencilLibrary(obj, elfObj, set, relocationMap);
+
+    emitJsonManifest(lib, jsonFileDir);
 
     return 0;
 }
@@ -399,7 +416,12 @@ static std::unordered_map<uint64_t, std::vector<llvm::object::RelocationRef>> bu
     return relocMap;
 }
 
-static std::unordered_map<std::string, Stencil> buildStencilLibrary(const std::unique_ptr<llvm::object::ObjectFile>& obj, llvm::object::ELF64LEObjectFile* elfObj, const std::unordered_set<std::string>& stencilSymbolNames) {
+static std::unordered_map<std::string, Stencil> buildStencilLibrary(
+    const std::unique_ptr<llvm::object::ObjectFile>& obj, 
+    llvm::object::ELF64LEObjectFile* elfObj, 
+    const std::unordered_set<std::string>& stencilSymbolNames,
+    const std::unordered_map<uint64_t, std::vector<llvm::object::RelocationRef>>& relocationMap
+) {
     #ifdef LOG_OUTPUT
         std::cout << '\n';
     #endif
@@ -440,6 +462,12 @@ static std::unordered_map<std::string, Stencil> buildStencilLibrary(const std::u
             continue;
         }
 
+        // every stencil function should have at least one relocation registered (the continuation function)
+        if(!relocationMap.count(symbolSectionIt->getIndex())) {
+            std::cerr << "Failed to find relocations for symbol: " << symbolName << '\n';
+            exit(EXIT_FAILURE);
+        }
+
         llvm::StringRef sectionContents = *sectionContentsOrErr;
         uint64_t sectionAddress = symbolSectionIt->getAddress();
 
@@ -456,10 +484,120 @@ static std::unordered_map<std::string, Stencil> buildStencilLibrary(const std::u
 
         stencil.m_code.assign(bytesStart, bytesEnd);
 
-        // TODO: get relocation information for stencil, then put in stencil.m_relocations
-        
+        const auto& relocations = relocationMap.at(symbolSectionIt->getIndex());
+
+        stencil.m_relocations.reserve(relocations.size());
+
+        for(const auto& relocation: relocations) {
+            Relocation reloc;
+
+            // since the function has the entire section to itself, the offset of the hole in the function == the secton offset
+            reloc.m_offset = relocation.getOffset();
+            reloc.m_elfRelocType = relocation.getType();
+
+            // get symbol
+            llvm::object::symbol_iterator targetSymIt = relocation.getSymbol();
+            std::string targetSymbol;
+
+            if(targetSymIt != obj->symbol_end()) {
+                auto targetNameOrErr = targetSymIt->getName();
+                if (targetNameOrErr) targetSymbol = targetNameOrErr->str();
+                else llvm::consumeError(targetNameOrErr.takeError());
+            }
+
+            // match relocation kind and ordinal
+            uint32_t ordinal;
+            RelocationKind kind;
+
+            if(IsMustTailPlaceholder(targetSymbol)) {
+                ordinal = ExtractOrdinal(targetSymbol, MUSTTAIL_PREFIX);
+                kind = RelocationKind::TailCall;
+            } else if(IsNoTailPlaceholder(targetSymbol)) {
+                ordinal = ExtractOrdinal(targetSymbol, NOTAIL_PREFIX);
+                kind = RelocationKind::NonTailCall;
+            } else if(IsDataPlaceholder(targetSymbol)) {
+                ordinal = ExtractOrdinal(targetSymbol, DATA_PREFIX);
+                kind = (relocation.getType() == llvm::ELF::R_X86_64_64) ? RelocationKind::U64Immediate : RelocationKind::NonTailCall;
+            } else {
+                std::cerr << "Failed to match symbol: " << targetSymbol << " in stencil function: " << symbolName << '\n';
+                exit(EXIT_FAILURE);
+            }
+
+            reloc.m_ordinal = ordinal;
+            reloc.m_kind = kind;
+
+            llvm::object::DataRefImpl relocRef = relocation.getRawDataRefImpl();
+            const auto* rela = elfObj->getRela(relocRef);
+            reloc.m_addend = rela ? rela->r_addend : 0;
+
+            // sanity checks
+            if(kind == RelocationKind::TailCall || kind == RelocationKind::NonTailCall) {
+                ReleaseAssert(reloc.m_elfRelocType == llvm::ELF::R_X86_64_PLT32 || reloc.m_elfRelocType == llvm::ELF::R_X86_64_PC32);
+            }
+
+            uint32_t patchWidth = (reloc.m_elfRelocType == llvm::ELF::R_X86_64_64) ? 8 : 4;
+            ReleaseAssert(reloc.m_offset + patchWidth <= stencil.m_code.size());
+
+            uint32_t width = (reloc.m_elfRelocType == llvm::ELF::R_X86_64_64) ? 8 : 4;
+            for(uint32_t i = 0; i < width; i++) {
+                ReleaseAssert(stencil.m_code[reloc.m_offset + i] == 0);
+            }
+
+            stencil.m_relocations.push_back(reloc);
+        }
+
         stencils.insert({ symbolName, stencil });
     }
 
+    #ifdef LOG_OUTPUT
+        std::cout << "[LOG] Finished building stencil library.\n";
+    #endif
+
     return stencils;
+}
+
+void emitJsonManifest(const std::unordered_map<std::string, Stencil>& stencilLibrary, std::string_view jsonFileDir) {
+    #ifdef LOG_OUTPUT
+        std::cout << '\n';
+    #endif
+
+    nlohmann::json manifest = nlohmann::json::object();
+
+    for(const auto& [name, stencil] : stencilLibrary) {
+        nlohmann::json entry;
+
+        entry["name"] = stencil.m_name;
+        entry["code"] = stencil.m_code;
+
+        nlohmann::json relocs = nlohmann::json::array();
+        for(const auto& reloc : stencil.m_relocations) {
+            nlohmann::json r;
+            r["offset"] = reloc.m_offset;
+            r["type"] = reloc.m_elfRelocType;
+            r["kind"] = static_cast<uint32_t>(reloc.m_kind);
+            r["ordinal"] = reloc.m_ordinal;
+            r["addend"] = reloc.m_addend;
+            relocs.push_back(std::move(r));
+        }
+        entry["relocations"] = std::move(relocs);
+
+        manifest[name] = std::move(entry);
+    }
+
+    std::ofstream jsonFile{ std::string(jsonFileDir) };
+    if(!jsonFile) {
+        std::cerr << "Failed to open " << jsonFileDir << " for writing.\n";
+        exit(EXIT_FAILURE);
+    }
+
+    jsonFile << manifest.dump(2);
+
+    if(!jsonFile) {
+        std::cerr << "Failed to write JSON manifest to " << jsonFileDir << '\n';
+        exit(EXIT_FAILURE);
+    }
+
+    #ifdef LOG_OUTPUT
+        std::cout << "[LOG] Emitted stencils JSON manifest to: '" << jsonFileDir << "'.\n";
+    #endif
 }

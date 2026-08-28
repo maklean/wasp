@@ -3,6 +3,7 @@
 #include <cstdint>
 
 // Generates the continuation function and data placeholder with the given ordinal.
+// NOTE: The symbol names should be consistent with the ones defined in relocation_type_resolver.hpp
 #define INTERNAL_GEN_DECLARATION_FOR_PLACEHOLDER(ordinal) \
     extern "C" void __dyn_specialization_musttail_boilerplate_function_placeholder_##ordinal(); \
     extern "C" void __dyn_specialization_notail_boilerplate_function_placeholder_##ordinal(); \

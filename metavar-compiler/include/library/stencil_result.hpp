@@ -16,7 +16,20 @@ enum class RelocationKind {
 };
 
 struct Relocation {
-    RelocationKind kind;
+    // The type of stencil hole this relocation is.
+    RelocationKind m_kind;
+
+    // The offset of the relocation in the function (where it's situated).
+    uint64_t m_offset;
+
+    // The ordinal of the stencil hole.
+    uint32_t m_ordinal;
+
+    // Raw ELF relocation type.
+    uint32_t m_elfRelocType;
+
+    // r_addend from RELA entry.
+    int64_t m_addend;
 };
 
 struct Stencil {
