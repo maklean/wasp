@@ -68,7 +68,7 @@ static std::unordered_map<std::string, Stencil> buildStencilLibrary(
 );
 
 // Emits the JSON manifest from the stencil library hashmap.
-void emitJsonManifest(const std::unordered_map<std::string, Stencil>& stencilLibrary, std::string_view jsonFileDir);
+static void emitJsonManifest(const std::unordered_map<std::string, Stencil>& stencilLibrary, std::string_view jsonFileDir);
 
 int main(int argc, char** argv) {
     initLLVM(argc, argv);
@@ -556,7 +556,7 @@ static std::unordered_map<std::string, Stencil> buildStencilLibrary(
     return stencils;
 }
 
-void emitJsonManifest(const std::unordered_map<std::string, Stencil>& stencilLibrary, std::string_view jsonFileDir) {
+static void emitJsonManifest(const std::unordered_map<std::string, Stencil>& stencilLibrary, std::string_view jsonFileDir) {
     #ifdef LOG_OUTPUT
         std::cout << '\n';
     #endif
