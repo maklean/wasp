@@ -5,7 +5,7 @@ bytecode instructions) defines meta-variables to express different stencil varia
 
 ## Installation Prereqs
 
-- CMake (at least version 3.31)
+- CMake (at least version 3.28)
 - LLVM 19
 - libffi
 - zlib
@@ -15,14 +15,14 @@ bytecode instructions) defines meta-variables to express different stencil varia
 To install on Ubuntu/Debian:
 ```bash
 sudo apt update
-sudo apt install clang-19 llvm-19-dev libffi-dev zlib1g-dev libxml2-dev libzstd-dev
+sudo apt install -y clang-19 clang libffi-dev zlib1g-dev libxml2-dev libzstd-dev llvm-19-dev cmake
 ```
 
 ## Building
 
 The MetaVar compiler depends on tricks (GHC convention, tailcalls, dynamic relocations) that require compiling with clang `-O3` specifically:
 ```bash
-cmake -B build -DCMAKE_CXX_COMPILER=clang++
+cmake -B build -DCMAKE_CXX_COMPILER=clang++-19
 cmake --build build -j$(nproc)
 ```
 
