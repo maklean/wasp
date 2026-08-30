@@ -5,5 +5,5 @@ bytecode instructions) defines meta-variables to express different stencil varia
 
 ## TODO:
 
-- [ ] Make CMake file for the MV compiler
+- [X] Make CMake file for the MV compiler
 - [ ] Implement stencil generators for other Wasm instructions

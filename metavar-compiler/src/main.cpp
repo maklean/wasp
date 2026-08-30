@@ -7,8 +7,7 @@
 #include "../include/utils/asserts.hpp"
 #include "../include/utils/relocation_type_resolver.hpp"
 
-// nlohmann/json
-#include "../include/utils/json.hpp"
+#include <nlohmann/json.hpp>
 
 #include <llvm/Support/InitLLVM.h>
 #include <llvm/Support/TargetSelect.h>
@@ -31,6 +30,8 @@
 #include <llvm/Object/ELFObjectFile.h>
 #include <llvm/BinaryFormat/ELF.h>
 
+#include <llvm/Support/Path.h>
+
 #include <unordered_set>
 #include <unordered_map>
 #include <string>
@@ -40,12 +41,15 @@
 #include <utility>
 #include <fstream>
 
-#define DEFAULT_ENTRY_POINT_DIR "output/stencils_entry.bc"
-#define DEFAULT_STENCILS_OBJ_FILE_DIR "output/stencils.o"
-#define DEFAULT_JSON_MANIFEST_DIR "output/stencils.json"
+#define ENTRY_POINT_FNAME "stencils_entry.bc"
+#define STENCILS_OBJ_FNAME "stencils.o"
+#define STENCILS_MANIFEST_FNAME "stencils.json"
 
 // Initializes all the necessary tools in LLVM.
 static void initLLVM(int argc, char** argv);
+
+// Resolves the directory for the given program file.
+static std::string resolveDir(const char* argv0, std::string_view fname);
 
 // Executes the stencil library entry point using LLJIT, returns a set of the symbol names of all generated stencil functions.
 static std::unordered_set<std::string> retrieveStencilSymbolNames(const char* executableDir, std::string_view entryPointDir);
@@ -73,9 +77,9 @@ static void emitJsonManifest(const std::unordered_map<std::string, Stencil>& ste
 int main(int argc, char** argv) {
     initLLVM(argc, argv);
 
-    std::string_view entryPointDir = argc >= 2 ? argv[1] : DEFAULT_ENTRY_POINT_DIR;
-    std::string_view objFileDir = argc >= 3 ? argv[2] : DEFAULT_STENCILS_OBJ_FILE_DIR;
-    std::string_view jsonFileDir = argc >= 4 ? argv[3] : DEFAULT_JSON_MANIFEST_DIR;
+    std::string entryPointDir = resolveDir(argv[0], ENTRY_POINT_FNAME);
+    std::string objFileDir = resolveDir(argv[0], STENCILS_OBJ_FNAME);
+    std::string jsonFileDir = resolveDir(argv[0], STENCILS_MANIFEST_FNAME);
 
     auto set = retrieveStencilSymbolNames(argv[0], entryPointDir);
     emitStencilObjFile(set, argv[0], entryPointDir, objFileDir);
@@ -101,14 +105,19 @@ static void initLLVM(int argc, char** argv) {
     llvm::InitializeNativeTargetAsmPrinter();
     llvm::InitializeNativeTargetAsmParser();
 
-    llvm::InitializeAllTargetInfos();
-    llvm::InitializeAllTargets();
-    llvm::InitializeAllTargetMCs();
-    llvm::InitializeAllAsmPrinters();
-
     #ifdef LOG_OUTPUT
         std::cout << "[LOG] Initialized LLVM stuff.\n";
     #endif
+}
+
+static std::string resolveDir(const char* argv0, std::string_view fname) {
+    llvm::SmallString<256> exePath(argv0);
+
+    llvm::sys::fs::make_absolute(exePath);
+    llvm::sys::path::remove_filename(exePath);
+    llvm::sys::path::append(exePath, fname);
+
+    return std::string{ exePath };
 }
 
 static std::unordered_set<std::string> retrieveStencilSymbolNames(const char* executableDir, std::string_view entryPointDir) {
