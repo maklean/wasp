@@ -28,6 +28,8 @@ cmake --build build -j$(nproc)
 
 The resulting executable should be at `build/output/main`
 
+> After running the executable, the stencil JSON manifest should be at `build/output/stencils.json`
+
 ## TODO:
 
 - [X] Make CMake file for the MV compiler
