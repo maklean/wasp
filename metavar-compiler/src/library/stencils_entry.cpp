@@ -7,4 +7,5 @@ extern "C" void __wasp_build_stencil_library__() {
 
     // RegisterBoilerplate<StencilGeneratorClass>("StencilGeneratorName")
     RegisterBoilerplate<WasmNoop>("WasmNoop");
+    RegisterBoilerplate<WasmConstant>("WasmConstant");
 }

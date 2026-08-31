@@ -58,7 +58,13 @@ static std::unordered_set<std::string> retrieveStencilSymbolNames(const char* ex
 static void emitStencilObjFile(const std::unordered_set<std::string>& stencilSymbolNames, const char* executableDir, std::string_view entryPointDir, std::string_view objFileDir);
 
 // Loads and parses the stencils object file.
-static std::pair<std::unique_ptr<llvm::object::ObjectFile>, llvm::object::ELF64LEObjectFile*> parseStencilsObjectFile(std::string_view objFileDir);
+struct ParsedStencilsObject {
+    std::unique_ptr<llvm::MemoryBuffer> buffer;
+    std::unique_ptr<llvm::object::ObjectFile> object;
+    llvm::object::ELF64LEObjectFile* elf;
+};
+
+static ParsedStencilsObject parseStencilsObjectFile(std::string_view objFileDir);
 
 // Builds a relocation map from the stencils object file that maps section index to its relocations.
 static std::unordered_map<uint64_t, std::vector<llvm::object::RelocationRef>> buildRelocationMap(const std::unique_ptr<llvm::object::ObjectFile>& obj);
@@ -84,10 +90,10 @@ int main(int argc, char** argv) {
     auto set = retrieveStencilSymbolNames(argv[0], entryPointDir);
     emitStencilObjFile(set, argv[0], entryPointDir, objFileDir);
 
-    auto objs = parseStencilsObjectFile(objFileDir);
+    auto parsed = parseStencilsObjectFile(objFileDir);
 
-    auto obj = std::move(objs.first);
-    auto elfObj = std::move(objs.second);
+    auto& obj = parsed.object;
+    auto* elfObj = parsed.elf;
 
     auto relocationMap = buildRelocationMap(obj);
 
@@ -359,7 +365,7 @@ static void emitStencilObjFile(const std::unordered_set<std::string>& stencilSym
     #endif
 }
 
-static std::pair<std::unique_ptr<llvm::object::ObjectFile>, llvm::object::ELF64LEObjectFile*> parseStencilsObjectFile(std::string_view objFileDir) {
+static ParsedStencilsObject parseStencilsObjectFile(std::string_view objFileDir) {
     #ifdef LOG_OUTPUT
         std::cout << '\n';
     #endif
@@ -370,7 +376,9 @@ static std::pair<std::unique_ptr<llvm::object::ObjectFile>, llvm::object::ELF64L
         exit(EXIT_FAILURE);
     }
 
-    auto objOrErr = llvm::object::ObjectFile::createObjectFile(bufferOfErr.get()->getMemBufferRef());
+    auto buffer = std::move(*bufferOfErr);
+
+    auto objOrErr = llvm::object::ObjectFile::createObjectFile(buffer->getMemBufferRef());
     if(!objOrErr) {
         std::cerr << "Failed to parse stencils object file.\n";
         exit(EXIT_FAILURE);
@@ -388,7 +396,7 @@ static std::pair<std::unique_ptr<llvm::object::ObjectFile>, llvm::object::ELF64L
         std::cout << "[LOG] Loaded and parsed '" << objFileDir << "'\n";
     #endif
 
-    return { std::move(obj), std::move(elfObj) };
+    return { std::move(buffer), std::move(obj), elfObj };
 }
 
 static std::unordered_map<uint64_t, std::vector<llvm::object::RelocationRef>> buildRelocationMap(const std::unique_ptr<llvm::object::ObjectFile>& obj) {
