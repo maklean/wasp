@@ -40,4 +40,11 @@ namespace OpaqueParamsHelper {
     }
 }; // namespace OpaqueParamsHelper
 
+enum class NumInRegisterOperands {
+    ZERO,
+    ONE,
+    TWO,
+    X_END_OF_ENUM = 3
+};
+
 }; // namespace wasp

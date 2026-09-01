@@ -51,8 +51,13 @@ static void initLLVM(int argc, char** argv);
 // Resolves the directory for the given program file.
 static std::string resolveDir(const char* argv0, std::string_view fname);
 
-// Executes the stencil library entry point using LLJIT, returns a set of the symbol names of all generated stencil functions.
-static std::unordered_set<std::string> retrieveStencilSymbolNames(const char* executableDir, std::string_view entryPointDir);
+struct StencilInformation {
+    std::unordered_set<std::string> stencilSymbolNames;
+    std::unordered_map<std::string, std::vector<std::pair<std::string, uint64_t>>> stencilMetaVarConfigs;
+};
+
+// Executes the stencil library entry point using LLJIT, returns a set of the symbol names of all generated stencil functions with their metavar configs.
+static StencilInformation retrieveStencilInformation(const char* executableDir, std::string_view entryPointDir);
 
 // Emits an object file (compiled with the GHC calling convention) containing all (given) generated stencil functions.
 static void emitStencilObjFile(const std::unordered_set<std::string>& stencilSymbolNames, const char* executableDir, std::string_view entryPointDir, std::string_view objFileDir);
@@ -78,7 +83,7 @@ static std::unordered_map<std::string, Stencil> buildStencilLibrary(
 );
 
 // Emits the JSON manifest from the stencil library hashmap.
-static void emitJsonManifest(const std::unordered_map<std::string, Stencil>& stencilLibrary, std::string_view jsonFileDir);
+static void emitJsonManifest(const std::unordered_map<std::string, Stencil>& stencilLibrary, const std::unordered_map<std::string, std::vector<std::pair<std::string, uint64_t>>>& stencilMetaVarConfigs, std::string_view jsonFileDir);
 
 int main(int argc, char** argv) {
     initLLVM(argc, argv);
@@ -87,7 +92,11 @@ int main(int argc, char** argv) {
     std::string objFileDir = resolveDir(argv[0], STENCILS_OBJ_FNAME);
     std::string jsonFileDir = resolveDir(argv[0], STENCILS_MANIFEST_FNAME);
 
-    auto set = retrieveStencilSymbolNames(argv[0], entryPointDir);
+    auto stencilInformation = retrieveStencilInformation(argv[0], entryPointDir);
+
+    auto set = std::move(stencilInformation.stencilSymbolNames);
+    auto metavarConfigs = std::move(stencilInformation.stencilMetaVarConfigs);
+
     emitStencilObjFile(set, argv[0], entryPointDir, objFileDir);
 
     auto parsed = parseStencilsObjectFile(objFileDir);
@@ -99,7 +108,7 @@ int main(int argc, char** argv) {
 
     auto lib = buildStencilLibrary(obj, elfObj, set, relocationMap);
 
-    emitJsonManifest(lib, jsonFileDir);
+    emitJsonManifest(lib, metavarConfigs, jsonFileDir);
 
     return 0;
 }
@@ -126,7 +135,7 @@ static std::string resolveDir(const char* argv0, std::string_view fname) {
     return std::string{ exePath };
 }
 
-static std::unordered_set<std::string> retrieveStencilSymbolNames(const char* executableDir, std::string_view entryPointDir) {
+static StencilInformation retrieveStencilInformation(const char* executableDir, std::string_view entryPointDir) {
     // create LLJIT instance
     auto jitOrErr = llvm::orc::LLJITBuilder().create();
     if(!jitOrErr) {
@@ -245,6 +254,9 @@ static std::unordered_set<std::string> retrieveStencilSymbolNames(const char* ex
     // get the symbol names of every stencil function
     std::unordered_set<std::string> stencilSymbolNames;
 
+    // maps symbolName => metaVar config
+    std::unordered_map<std::string, std::vector<std::pair<std::string, uint64_t>>> stencilMetaVarConfigs;
+
     for(const auto& bp: packs) {
         for(const auto& inst: bp.m_data.m_instances) {
             uint64_t stencilFuncAddr = reinterpret_cast<uint64_t>(inst.m_fnPtr);
@@ -254,7 +266,12 @@ static std::unordered_set<std::string> retrieveStencilSymbolNames(const char* ex
                 exit(EXIT_FAILURE);
             }
 
-            stencilSymbolNames.insert(std::string { addrToSym[stencilFuncAddr] });
+            std::string stencilSymbol{ addrToSym[stencilFuncAddr] };
+            stencilSymbolNames.insert(stencilSymbol);
+
+            for(size_t i{}; i < inst.m_values.size(); i++) {
+                stencilMetaVarConfigs[stencilSymbol].push_back(std::pair { bp.m_data.m_metavars[i].m_name, inst.m_values[i] });
+            }
         }
     }
 
@@ -262,7 +279,7 @@ static std::unordered_set<std::string> retrieveStencilSymbolNames(const char* ex
         std::cout << "[LOG] Retrieved all " << stencilSymbolNames.size() << " stencil functions symbol names.\n";
     #endif
 
-    return stencilSymbolNames;
+    return { stencilSymbolNames, stencilMetaVarConfigs };
 }
 
 static void emitStencilObjFile(const std::unordered_set<std::string>& stencilSymbolNames, const char* executableDir, std::string_view entryPointDir, std::string_view objFileDir) {
@@ -573,7 +590,7 @@ static std::unordered_map<std::string, Stencil> buildStencilLibrary(
     return stencils;
 }
 
-static void emitJsonManifest(const std::unordered_map<std::string, Stencil>& stencilLibrary, std::string_view jsonFileDir) {
+static void emitJsonManifest(const std::unordered_map<std::string, Stencil>& stencilLibrary, const std::unordered_map<std::string, std::vector<std::pair<std::string, uint64_t>>>& stencilMetaVarConfigs, std::string_view jsonFileDir) {
     #ifdef LOG_OUTPUT
         std::cout << '\n';
     #endif
@@ -582,8 +599,7 @@ static void emitJsonManifest(const std::unordered_map<std::string, Stencil>& ste
 
     for(const auto& [name, stencil] : stencilLibrary) {
         nlohmann::json entry;
-
-        entry["name"] = stencil.m_name;
+        
         entry["code"] = stencil.m_code;
 
         nlohmann::json relocs = nlohmann::json::array();
@@ -597,6 +613,10 @@ static void emitJsonManifest(const std::unordered_map<std::string, Stencil>& ste
             relocs.push_back(std::move(r));
         }
         entry["relocations"] = std::move(relocs);
+
+        for(const auto& [metaVarName, metaVarValue]: stencilMetaVarConfigs.at(name)) {
+            entry[metaVarName] = metaVarValue;
+        }
 
         manifest[name] = std::move(entry);
     }
